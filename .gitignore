@@ -1,0 +1,33 @@
+# Build output
+.build/
+build/
+DerivedData/
+
+# Xcode & SwiftPM user state / schemes
+xcuserdata/
+*.xcuserdatad/
+*.xcuserstate
+.swiftpm/xcode/xcuserdata/
+.swiftpm/configuration/
+
+# Generated Xcode project from App/project.yml (`xcodegen generate`)
+*.xcodeproj/
+!*.xcodeproj/project.pbxproj
+!*.xcodeproj/xcshareddata/
+App/NoteLume.xcodeproj/
+
+# Local signing credentials & secrets
+.env
+.env.*
+*.p12
+*.p8
+*.pfx
+*.pem
+*.key
+*.mobileprovision
+
+# macOS
+.DS_Store
+.temp
+*.swp
+*~

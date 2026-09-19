@@ -1,0 +1,22 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test core
+        run: swift test --package-path Core
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Build universal app
+        run: bash scripts/build.sh Release

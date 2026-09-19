@@ -1,0 +1,61 @@
+name: NoteLume
+options:
+  bundleIdPrefix: com.cybasoft
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    SWIFT_STRICT_CONCURRENCY: targeted
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+    CODE_SIGN_IDENTITY: "-"
+    CODE_SIGN_STYLE: Manual
+    ENABLE_HARDENED_RUNTIME: YES
+    MARKETING_VERSION: "1.0.0"
+    CURRENT_PROJECT_VERSION: "1"
+packages:
+  NoteLumeCore:
+    path: ../Core
+targets:
+  NoteLume:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources
+      - path: Resources/Assets.xcassets
+      - path: ../LICENSE
+        buildPhase: resources
+    dependencies:
+      - package: NoteLumeCore
+    entitlements:
+      path: Resources/NoteLume.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+        com.apple.security.files.user-selected.read-write: true
+        com.apple.security.files.bookmarks.app-scope: true
+    info:
+      path: Resources/Info.plist
+      properties:
+        CFBundleName: NoteLume
+        CFBundleDisplayName: NoteLume
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        LSMinimumSystemVersion: "14.0"
+        LSApplicationCategoryType: public.app-category.productivity
+        NSHumanReadableCopyright: "Notes are plain Markdown files you own."
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: Markdown Note
+            CFBundleTypeRole: Editor
+            LSItemContentTypes: [net.daringfireball.markdown]
+            LSHandlerRank: Alternate
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.cybasoft.notelume
+        GENERATE_INFOPLIST_FILE: NO
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+schemes:
+  NoteLume:
+    build:
+      targets:
+        NoteLume: all
