@@ -216,9 +216,10 @@ final class AppModel {
         }
 
         let markdown = settings?.editorMode != .source
+        let color = settings?.defaultNoteColor
         Task {
             do {
-                let note = try await store.create(labels: effectiveLabels, sticky: effectiveSticky, markdown: markdown)
+            let note = try await store.create(labels: effectiveLabels, sticky: effectiveSticky, color: color, markdown: markdown)
                 if open { openNote(note.document.metadata.id) }
             } catch { lastError = error.localizedDescription }
         }

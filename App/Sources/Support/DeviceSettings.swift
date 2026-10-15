@@ -61,6 +61,7 @@ final class DeviceSettings {
     @ObservationIgnored private let index: NoteIndex
 
     var editorMode: EditorMode { didSet { save("editorMode", editorMode.rawValue) } }
+    var defaultNoteColor: String? { didSet { save("defaultNoteColor", defaultNoteColor ?? "") } }
     var layout: CollectionLayout { didSet { save("layout", layout.rawValue) } }
     var tileSize: Double { didSet { save("tileSize", String(tileSize)) } }
     var showPreviews: Bool { didSet { save("showPreviews", showPreviews ? "1" : "0") } }
@@ -78,6 +79,7 @@ final class DeviceSettings {
         self.index = index
         func get(_ k: String) -> String? { (try? index.setting(k)) ?? nil }
         editorMode = EditorMode(rawValue: get("editorMode") ?? "") ?? .visual
+        defaultNoteColor = get("defaultNoteColor").flatMap { $0.isEmpty ? nil : $0 }
         layout = CollectionLayout(rawValue: get("layout") ?? "") ?? .stacked
         tileSize = Double(get("tileSize") ?? "") ?? 200
         showPreviews = (get("showPreviews") ?? "1") == "1"

@@ -78,6 +78,48 @@ private struct WindowSettings: View {
     @Bindable var settings: DeviceSettings
     var body: some View {
         Form {
+            Section {
+                LabeledContent("Default note color") {
+                    HStack(spacing: 8) {
+                        Button {
+                            settings.defaultNoteColor = nil
+                        } label: {
+                            Circle().strokeBorder(.secondary).frame(width: 22, height: 22)
+                                .overlay {
+                                    if settings.defaultNoteColor == nil {
+                                        Image(systemName: "checkmark").font(.caption2)
+                                    }
+                                }
+                        }
+                        .buttonStyle(.plain)
+                        .help("Automatic")
+                        .accessibilityLabel("Automatic note color")
+                        ForEach(NoteAppearance.presets, id: \.hex) { preset in
+                            Button {
+                                settings.defaultNoteColor = preset.hex
+                            } label: {
+                                Circle().fill(Color(nsColor: NSColor(hex: preset.hex)!))
+                                    .frame(width: 22, height: 22)
+                                    .overlay {
+                                        if settings.defaultNoteColor == preset.hex {
+                                            Image(systemName: "checkmark").font(.caption2)
+                                                .foregroundStyle(.black.opacity(0.7))
+                                        }
+                                    }
+                            }
+                            .buttonStyle(.plain)
+                            .help(preset.name)
+                            .accessibilityLabel(preset.name)
+                        }
+                    }
+                }
+                ColorPicker(
+                    "Custom note color",
+                    selection: Binding(
+                        get: { Color(nsColor: NSColor(hex: settings.defaultNoteColor) ?? .windowBackgroundColor) },
+                        set: { settings.defaultNoteColor = NSColor($0).hexString }),
+                    supportsOpacity: false)
+            }
             Picker("Collection layout", selection: $settings.layout) {
                 ForEach(CollectionLayout.allCases) { Text($0.title).tag($0) }
             }
