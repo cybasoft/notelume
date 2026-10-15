@@ -3,7 +3,7 @@ import NoteLumeCore
 import SwiftUI
 
 extension NSAttributedString.Key {
-    /// Marks syntax characters (`**`, `#`, `[`…) that visual mode collapses while the caret is elsewhere.
+    /// Marks source characters replaced by image and divider previews in visual mode.
     static let qnHidden = NSAttributedString.Key("notelume.hidden")
 }
 
@@ -313,7 +313,7 @@ struct MarkdownEditor: NSViewRepresentable {
             return false
         }
 
-        // MARK: Hidden syntax → null glyphs
+        // MARK: Hidden syntax
 
         func layoutManager(
             _ layoutManager: NSLayoutManager, shouldGenerateGlyphs glyphs: UnsafePointer<CGGlyph>,
@@ -416,7 +416,7 @@ struct MarkdownEditor: NSViewRepresentable {
             storage.setAttributes(base, range: full)
             for span in cachedSpans { style(span, in: storage, base: base) }
 
-            // Syntax markers: dim in source mode; collapse in visual mode unless the caret is on that part of the note.
+            // Syntax markers retain their metrics so selection changes cannot reflow the note.
             for span in cachedSpans {
                 for r in span.syntax where NSMaxRange(r) <= storage.length {
                     if visual, case .checkbox = span.kind { continue }
@@ -433,8 +433,7 @@ struct MarkdownEditor: NSViewRepresentable {
                             storage.addAttribute(
                                 .foregroundColor, value: NSColor.tertiaryLabelColor, range: r)
                         } else {
-                            storage.addAttribute(.qnHidden, value: true, range: r)
-                            newHidden.append(r)
+                            storage.addAttribute(.foregroundColor, value: NSColor.clear, range: r)
                         }
                     } else {
                         storage.addAttribute(
@@ -535,6 +534,20 @@ struct MarkdownEditor: NSViewRepresentable {
                             ofSize: baseSize * 0.92, weight: .regular),
                         .paragraphStyle: codePara,
                     ], range: r)
+                let text = storage.string as NSString
+                let firstLine = text.lineRange(for: NSRange(location: r.location, length: 0))
+                let lastLine = text.lineRange(
+                    for: NSRange(location: NSMaxRange(r) - 1, length: 0))
+                let firstParagraph = codePara.mutableCopy() as! NSMutableParagraphStyle
+                firstParagraph.paragraphSpacingBefore = 6
+                if !span.syntax.isEmpty { firstParagraph.minimumLineHeight = 26 }
+                if firstLine == lastLine { firstParagraph.paragraphSpacing = 6 }
+                storage.addAttribute(.paragraphStyle, value: firstParagraph, range: firstLine)
+                if firstLine != lastLine {
+                    let lastParagraph = codePara.mutableCopy() as! NSMutableParagraphStyle
+                    lastParagraph.paragraphSpacing = 6
+                    storage.addAttribute(.paragraphStyle, value: lastParagraph, range: lastLine)
+                }
                 let tokens = CodeHighlighter.highlight(in: storage.string, span: span)
                 let isDark = parent.textColor.luminance > 0.5
                 for token in tokens where NSMaxRange(token.range) <= storage.length {
@@ -679,10 +692,18 @@ final class MarkdownTextView: NSTextView {
     private weak var observedWindow: NSWindow?
     private var resignKeyObserver: NSObjectProtocol?
     private var checkboxButtons: [Int: NSButton] = [:]
-    private static let controlFont = NSFont.systemFont(ofSize: 11, weight: .medium)
-    private static let languages = [
-        "bash", "swift", "python", "javascript", "typescript", "json", "yaml", "html", "css", "sql",
-    ]
+    private lazy var copyButton: NSButton = {
+        let button = NSButton(
+            image: NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: "Copy code")!,
+            target: self, action: #selector(copyHoveredCode(_:)))
+        button.bezelStyle = .regularSquare
+        button.isBordered = false
+        button.toolTip = "Copy code"
+        button.setAccessibilityLabel("Copy code")
+        button.isHidden = true
+        addSubview(button)
+        return button
+    }()
 
     override func draw(_ dirtyRect: NSRect) {
         updateCheckboxButtons()
@@ -784,8 +805,8 @@ final class MarkdownTextView: NSTextView {
             let glyphRange = lm.glyphRange(forCharacterRange: span.range, actualCharacterRange: nil)
             guard glyphRange.length > 0 else { continue }
             var union: NSRect?
-            lm.enumerateLineFragments(forGlyphRange: glyphRange) { rect, _, _, _, _ in
-                union = union.map { $0.union(rect) } ?? rect
+            lm.enumerateLineFragments(forGlyphRange: glyphRange) { _, usedRect, _, _, _ in
+                union = union.map { $0.union(usedRect) } ?? usedRect
             }
             guard let block = union else { continue }
             let rect = NSRect(
@@ -803,31 +824,14 @@ final class MarkdownTextView: NSTextView {
     }
 
     private func controlsVisible(_ card: CodeCard) -> Bool {
-        guard let coord = coordinator, coord.isVisual, !card.span.syntax.isEmpty,
-            card.rect.width > 220
+        guard let coord = coordinator, coord.isVisual, card.rect.width > 80
         else { return false }
-        return hoveredBlock == card.span.range.location || isFocused(card.span)
-    }
-
-    private func languageName(_ span: MarkdownSpan) -> String {
-        guard case .codeBlock(let language) = span.kind else { return "" }
-        return language?.split(separator: " ").first.map { String($0).lowercased() } ?? ""
-    }
-
-    private func languageLabel(_ span: MarkdownSpan) -> String {
-        (languageName(span).isEmpty ? "text" : languageName(span)) + " \u{25BE}"
+        return hoveredBlock == card.span.range.location
     }
 
     /// Controls sit on the fence line, which keeps its height even while the fence text is hidden.
-    private func controlRects(for card: CodeCard) -> (lang: NSRect, copy: NSRect) {
-        let y = card.rect.minY + 5
-        let copy = NSRect(x: card.rect.maxX - 8 - 52, y: y, width: 52, height: 20)
-        let width =
-            ceil(
-                (languageLabel(card.span) as NSString).size(withAttributes: [
-                    .font: Self.controlFont
-                ]).width) + 18
-        return (NSRect(x: copy.minX - 6 - width, y: y, width: width, height: 20), copy)
+    private func copyControlRect(for card: CodeCard) -> NSRect {
+        NSRect(x: card.rect.maxX - 30, y: card.rect.minY + 4, width: 24, height: 24)
     }
 
     private func drawCodeBackgrounds(_ cards: [CodeCard], in dirtyRect: NSRect) {
@@ -850,28 +854,19 @@ final class MarkdownTextView: NSTextView {
     }
 
     private func drawCodeControls(_ cards: [CodeCard]) {
+        let hoveredCard = cards.first(where: controlsVisible)
+        copyButton.isHidden = hoveredCard == nil
+        if let hoveredCard {
+            copyButton.frame = copyControlRect(for: hoveredCard)
+            copyButton.image = NSImage(
+                systemSymbolName: copiedBlock == hoveredCard.span.range.location
+                    ? "checkmark" : "doc.on.doc",
+                accessibilityDescription: "Copy code")
+        }
         guard let coord = coordinator else { return }
         let isDark = coord.appliedTextColor.luminance > 0.5
         let ink =
             isDark ? NSColor.white.withAlphaComponent(0.85) : NSColor.black.withAlphaComponent(0.7)
-        let fill = isDark ? NSColor.white.withAlphaComponent(0.12) : NSColor.white
-        let stroke =
-            isDark ? NSColor.white.withAlphaComponent(0.2) : NSColor.black.withAlphaComponent(0.12)
-        for card in cards where controlsVisible(card) {
-            let rects = controlRects(for: card)
-            for rect in [rects.lang, rects.copy] {
-                let path = NSBezierPath(roundedRect: rect, xRadius: 5, yRadius: 5)
-                fill.setFill()
-                path.fill()
-                stroke.setStroke()
-                path.lineWidth = 1
-                path.stroke()
-            }
-            drawLabel(languageLabel(card.span), in: rects.lang, color: ink)
-            drawLabel(
-                copiedBlock == card.span.range.location ? "Copied" : "Copy", in: rects.copy,
-                color: ink)
-        }
         guard let layoutManager, let textContainer else { return }
         let origin = textContainerOrigin
         for card in cards where coord.showsLineNumbers(at: card.span.range.location) {
@@ -951,20 +946,6 @@ final class MarkdownTextView: NSTextView {
         }
     }
 
-    private func drawLabel(_ text: String, in rect: NSRect, color: NSColor) {
-        let style = NSMutableParagraphStyle()
-        style.alignment = .center
-        let attrs: [NSAttributedString.Key: Any] = [
-            .font: Self.controlFont, .foregroundColor: color, .paragraphStyle: style,
-        ]
-        let height = (text as NSString).size(withAttributes: attrs).height
-        (text as NSString).draw(
-            in: NSRect(
-                x: rect.minX, y: rect.minY + (rect.height - height) / 2, width: rect.width,
-                height: height),
-            withAttributes: attrs)
-    }
-
     // MARK: Hover and clicks
 
     override func updateTrackingAreas() {
@@ -997,13 +978,8 @@ final class MarkdownTextView: NSTextView {
 
     private func handleCodeControlClick(at point: NSPoint) -> Bool {
         for card in codeCards() where controlsVisible(card) {
-            let rects = controlRects(for: card)
-            if rects.copy.contains(point) {
+            if copyControlRect(for: card).contains(point) {
                 copyCode(card.span)
-                return true
-            }
-            if rects.lang.contains(point) {
-                showLanguageMenu(card, anchor: rects.lang)
                 return true
             }
         }
@@ -1148,21 +1124,19 @@ final class MarkdownTextView: NSTextView {
         }
     }
 
-    private func showLanguageMenu(_ card: CodeCard, anchor: NSRect) {
-        let current = languageName(card.span)
-        var options = Self.languages
-        if !current.isEmpty, !options.contains(current) { options.insert(current, at: 0) }
-        let menu = NSMenu()
-        for language in options + [""] {
-            let item = NSMenuItem(
-                title: language.isEmpty ? "Plain Text" : language,
-                action: #selector(pickLanguage(_:)), keyEquivalent: "")
-            item.target = self
-            item.tag = card.span.range.location
-            item.representedObject = language
-            item.state = language == current ? .on : .off
-            menu.addItem(item)
+    @objc private func copyHoveredCode(_ sender: NSButton) {
+        guard let span = coordinator?.codeBlockSpans.first(where: {
+            $0.range.location == hoveredBlock
+        }) else { return }
+        copyCode(span)
+    }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let point = convert(event.locationInWindow, from: nil)
+        guard let card = codeCards().first(where: { $0.rect.contains(point) }) else {
+            return super.menu(for: event)
         }
+        let menu = super.menu(for: event) ?? NSMenu()
         menu.addItem(.separator())
         let raw = NSMenuItem(
             title: coordinator?.isRawCodeBlock(at: card.span.range.location) == true
@@ -1180,7 +1154,7 @@ final class MarkdownTextView: NSTextView {
         numbers.state =
             coordinator?.showsLineNumbers(at: card.span.range.location) == true ? .on : .off
         menu.addItem(numbers)
-        menu.popUp(positioning: nil, at: NSPoint(x: anchor.minX, y: anchor.maxY + 2), in: self)
+        return menu
     }
 
     @objc private func toggleRawCodeBlock(_ item: NSMenuItem) {
@@ -1191,24 +1165,6 @@ final class MarkdownTextView: NSTextView {
     @objc private func toggleLineNumbers(_ item: NSMenuItem) {
         coordinator?.toggleCodeLineNumbers(at: item.tag)
         needsDisplay = true
-    }
-
-    @objc private func pickLanguage(_ item: NSMenuItem) {
-        guard let language = item.representedObject as? String,
-            let span = coordinator?.codeBlockSpans.first(where: { $0.range.location == item.tag }),
-            let fence = span.syntax.first, NSMaxRange(fence) <= (string as NSString).length
-        else { return }
-        let line = (string as NSString).substring(with: fence)
-        let indent = String(line.prefix { $0 == " " })
-        let marker = String(line.dropFirst(indent.count).prefix { $0 == "`" || $0 == "~" })
-        guard marker.count >= 3 else { return }
-        let replacement = indent + marker + language
-        let sel = selectedRange()
-        let delta = (replacement as NSString).length - fence.length
-        let newSel =
-            sel.location >= NSMaxRange(fence)
-            ? NSRange(location: sel.location + delta, length: sel.length) : sel
-        apply(TextEdit(range: fence, replacement: replacement, selection: newSel))
     }
 
     /// Applies an edit through the normal text-system path so undo and change notifications work.
