@@ -5,6 +5,7 @@ import SwiftUI
 extension NSAttributedString.Key {
     /// Marks source characters replaced by image and divider previews in visual mode.
     static let qnHidden = NSAttributedString.Key("notelume.hidden")
+    static let qnForegroundRole = NSAttributedString.Key("notelume.foregroundRole")
 }
 
 /// Live-Markdown editor.
@@ -97,6 +98,12 @@ struct MarkdownEditor: NSViewRepresentable {
 
     @MainActor
     final class Coordinator: NSObject, NSTextViewDelegate, @preconcurrency NSLayoutManagerDelegate {
+        private enum ForegroundRole {
+            case body
+            case token(CodeToken.Kind)
+            case fixed
+        }
+
         var parent: MarkdownEditor
         weak var textView: MarkdownTextView?
         private var appliedRevision = -1
@@ -105,6 +112,8 @@ struct MarkdownEditor: NSViewRepresentable {
         private var isProgrammatic = false
         private var cachedText: String?
         private var cachedSpans: [MarkdownSpan] = []
+        private var cachedCodeTokens: [Int: [CodeToken]] = [:]
+        private var appliedSelectionSpans: [Int] = []
         private var hiddenRanges: [NSRange] = []
         private var rawCodeBlocks = Set<Int>()
         private var codeLineNumbers = Set<Int>()
@@ -196,10 +205,11 @@ struct MarkdownEditor: NSViewRepresentable {
                 restyle(force: true)
                 return
             }
-            if appliedMode != parent.mode || appliedColor != parent.textColor {
-                let modeChanged = appliedMode != parent.mode
+            if appliedMode != parent.mode {
                 restyle(force: true)
-                if modeChanged { notifyRawModeChange() }
+                notifyRawModeChange()
+            } else if appliedColor != parent.textColor {
+                updateTextColors()
             }
             if searchRequest != parent.searchRequest {
                 let direction = parent.searchRequest - searchRequest
@@ -245,7 +255,25 @@ struct MarkdownEditor: NSViewRepresentable {
         func textViewDidChangeSelection(_ notification: Notification) {
             guard !isProgrammatic else { return }
             if let tv = textView { updateSpellingCorrection(for: tv) }
-            restyle(force: false)
+            if cachedText != textView?.string || selectionSpans() != appliedSelectionSpans {
+                restyle(force: false)
+            } else {
+                textView?.needsDisplay = true
+            }
+        }
+
+        private func selectionSpans() -> [Int] {
+            guard visual, let textView else { return [] }
+            let text = textView.string as NSString
+            let selection = textView.selectedRange()
+            return cachedSpans.indices.filter { index in
+                let span = cachedSpans[index]
+                guard NSMaxRange(span.range) <= text.length else { return false }
+                if span.syntax.isEmpty {
+                    guard case .image = span.kind else { return false }
+                }
+                return MarkdownEditing.selection(selection, touches: text.lineRange(for: span.range))
+            }
         }
 
         private func updateSpellingCorrection(for textView: NSTextView) {
@@ -389,20 +417,68 @@ struct MarkdownEditor: NSViewRepresentable {
             let style = NSMutableParagraphStyle()
             style.lineHeightMultiple = visual ? 1.18 : 1.1
             style.paragraphSpacing = visual ? 3 : 0
-            return [.font: baseFont(), .foregroundColor: parent.textColor, .paragraphStyle: style]
+            return [
+                .font: baseFont(), .foregroundColor: parent.textColor, .paragraphStyle: style,
+                .qnForegroundRole: ForegroundRole.body,
+            ]
+        }
+
+        private func setColor(
+            _ color: NSColor, role: ForegroundRole = .fixed,
+            in storage: NSTextStorage, range: NSRange
+        ) {
+            storage.addAttributes(
+                [.foregroundColor: color, .qnForegroundRole: role], range: range)
+        }
+
+        private func updateTextColors() {
+            guard !isProgrammatic, let tv = textView, let storage = tv.textStorage,
+                !tv.hasMarkedText()
+            else { return }
+            isProgrammatic = true
+            defer { isProgrammatic = false }
+            let full = NSRange(location: 0, length: storage.length)
+            let isDark = parent.textColor.luminance > 0.5
+            var changes: [(NSRange, NSColor)] = []
+            storage.enumerateAttributes(in: full) { attributes, range, _ in
+                guard let role = attributes[.qnForegroundRole] as? ForegroundRole else { return }
+                let color: NSColor
+                switch role {
+                case .body: color = parent.textColor
+                case .token(let kind): color = Self.tokenColor(kind, isDark: isDark)
+                case .fixed: return
+                }
+                if attributes[.foregroundColor] as? NSColor != color {
+                    changes.append((range, color))
+                }
+            }
+            storage.beginEditing()
+            for (range, color) in changes {
+                storage.addAttribute(.foregroundColor, value: color, range: range)
+            }
+            storage.endEditing()
+            appliedColor = parent.textColor
+            tv.typingAttributes = baseAttributes()
+            tv.insertionPointColor = parent.textColor
+            tv.needsDisplay = true
         }
 
         func restyle(force: Bool) {
-            guard let tv = textView, let storage = tv.textStorage, !tv.hasMarkedText() else {
+            guard !isProgrammatic, let tv = textView, let storage = tv.textStorage,
+                !tv.hasMarkedText()
+            else {
                 return
             }
+            isProgrammatic = true
+            defer { isProgrammatic = false }
             let text = storage.string
             let full = NSRange(location: 0, length: storage.length)
             let base = baseAttributes()
 
-            if force || cachedText != text {
+            if cachedText != text {
                 // Very large notes stay plain: styling must never make typing laggy.
                 cachedSpans = storage.length > 300_000 ? [] : MarkdownAnalyzer.spans(in: text)
+                cachedCodeTokens.removeAll(keepingCapacity: true)
                 cachedText = text
             }
             appliedMode = parent.mode
@@ -430,14 +506,12 @@ struct MarkdownEditor: NSViewRepresentable {
                         let lines = ns.lineRange(for: span.range)
                         let touching = MarkdownEditing.selection(sel, touches: lines)
                         if touching {
-                            storage.addAttribute(
-                                .foregroundColor, value: NSColor.tertiaryLabelColor, range: r)
+                            setColor(.tertiaryLabelColor, in: storage, range: r)
                         } else {
-                            storage.addAttribute(.foregroundColor, value: NSColor.clear, range: r)
+                            setColor(.clear, in: storage, range: r)
                         }
                     } else {
-                        storage.addAttribute(
-                            .foregroundColor, value: NSColor.tertiaryLabelColor, range: r)
+                        setColor(.tertiaryLabelColor, in: storage, range: r)
                     }
                 }
                 if visual, case .thematicBreak = span.kind, span.range.length > 0 {
@@ -455,7 +529,7 @@ struct MarkdownEditor: NSViewRepresentable {
             }
             if visual {
                 for span in checkboxSpans where NSMaxRange(span.range) <= storage.length {
-                    storage.addAttribute(.foregroundColor, value: NSColor.clear, range: span.range)
+                    setColor(.clear, in: storage, range: span.range)
                 }
             }
             searchMatches = MarkdownEditing.searchMatches(in: text, query: parent.searchQuery)
@@ -480,6 +554,8 @@ struct MarkdownEditor: NSViewRepresentable {
             }
             tv.needsLayout = true
             tv.needsDisplay = true
+            tv.invalidateCodeCards()
+            appliedSelectionSpans = selectionSpans()
         }
 
         private func style(
@@ -497,7 +573,7 @@ struct MarkdownEditor: NSViewRepresentable {
                 setFont(storage, r) {
                     NSFontManager.shared.convert($0.withSize(size), toHaveTrait: .boldFontMask)
                 }
-                if !visual { storage.addAttribute(.foregroundColor, value: accent, range: r) }
+                if !visual { setColor(accent, in: storage, range: r) }
             case .strong:
                 setFont(storage, r) { NSFontManager.shared.convert($0, toHaveTrait: .boldFontMask) }
             case .emphasis:
@@ -509,6 +585,7 @@ struct MarkdownEditor: NSViewRepresentable {
                     [
                         .strikethroughStyle: NSUnderlineStyle.single.rawValue,
                         .foregroundColor: NSColor.secondaryLabelColor,
+                        .qnForegroundRole: ForegroundRole.fixed,
                     ], range: r)
             case .inlineCode:
                 storage.addAttributes(
@@ -548,19 +625,27 @@ struct MarkdownEditor: NSViewRepresentable {
                     lastParagraph.paragraphSpacing = 6
                     storage.addAttribute(.paragraphStyle, value: lastParagraph, range: lastLine)
                 }
-                let tokens = CodeHighlighter.highlight(in: storage.string, span: span)
+                let tokens: [CodeToken]
+                if let cached = cachedCodeTokens[r.location] {
+                    tokens = cached
+                } else {
+                    tokens = CodeHighlighter.highlight(in: storage.string, span: span)
+                    cachedCodeTokens[r.location] = tokens
+                }
                 let isDark = parent.textColor.luminance > 0.5
                 for token in tokens where NSMaxRange(token.range) <= storage.length {
                     let color = Self.tokenColor(token.kind, isDark: isDark)
-                    storage.addAttribute(.foregroundColor, value: color, range: token.range)
+                    setColor(color, role: .token(token.kind), in: storage, range: token.range)
                 }
             case .link(let dest):
-                var attrs: [NSAttributedString.Key: Any] = [.foregroundColor: accent]
+                var attrs: [NSAttributedString.Key: Any] = [
+                    .foregroundColor: accent, .qnForegroundRole: ForegroundRole.fixed,
+                ]
                 if visual { attrs[.underlineStyle] = NSUnderlineStyle.single.rawValue }
                 if let dest, let url = URL(string: dest) { attrs[.toolTip] = url.absoluteString }
                 storage.addAttributes(attrs, range: r)
             case .image:
-                storage.addAttribute(.foregroundColor, value: NSColor.secondaryLabelColor, range: r)
+                setColor(.secondaryLabelColor, in: storage, range: r)
                 if visual, let image = localImage(for: span), let tv = textView {
                     let maxWidth = max(100, tv.bounds.width - 40)
                     let ratio = min(
@@ -584,13 +669,17 @@ struct MarkdownEditor: NSViewRepresentable {
                     p.firstLineHeadIndent = 12
                 }
                 storage.addAttributes(
-                    [.foregroundColor: NSColor.secondaryLabelColor, .paragraphStyle: p], range: r)
+                    [
+                        .foregroundColor: NSColor.secondaryLabelColor, .paragraphStyle: p,
+                        .qnForegroundRole: ForegroundRole.fixed,
+                    ], range: r)
             case .listMarker:
-                storage.addAttribute(.foregroundColor, value: accent, range: r)
+                setColor(accent, in: storage, range: r)
             case .checkbox(let checked):
                 storage.addAttributes(
                     [
                         .foregroundColor: checked ? NSColor.secondaryLabelColor : accent,
+                        .qnForegroundRole: ForegroundRole.fixed,
                         .font: NSFont.monospacedSystemFont(ofSize: baseSize, weight: .semibold),
                     ], range: r)
             case .tableHeader:
@@ -604,7 +693,7 @@ struct MarkdownEditor: NSViewRepresentable {
                     value: NSFont.monospacedSystemFont(ofSize: baseSize * 0.93, weight: .regular),
                     range: r)
             case .thematicBreak:
-                storage.addAttribute(.foregroundColor, value: NSColor.tertiaryLabelColor, range: r)
+                setColor(.tertiaryLabelColor, in: storage, range: r)
             }
         }
 
@@ -688,6 +777,8 @@ final class MarkdownTextView: NSTextView {
     private var hoverArea: NSTrackingArea?
     private var hoveredBlock: Int?
     private var copiedBlock: Int?
+    private var cachedCodeCards: [CodeCard]?
+    private var copySymbol = ""
     private var slashMenu: SlashMenuState?
     private weak var observedWindow: NSWindow?
     private var resignKeyObserver: NSObjectProtocol?
@@ -719,6 +810,17 @@ final class MarkdownTextView: NSTextView {
     override func layout() {
         super.layout()
         updateCheckboxButtons()
+        updateCopyButton(codeCards())
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        let widthChanged = newSize.width != frame.width
+        super.setFrameSize(newSize)
+        if widthChanged { invalidateCodeCards() }
+    }
+
+    func invalidateCodeCards() {
+        cachedCodeCards = nil
     }
 
     private func updateCheckboxButtons() {
@@ -797,6 +899,7 @@ final class MarkdownTextView: NSTextView {
 
     /// One rounded card per fenced/indented block, spanning every line including blank and hidden fence lines.
     private func codeCards() -> [CodeCard] {
+        if let cachedCodeCards { return cachedCodeCards }
         guard let lm = layoutManager, let coord = coordinator else { return [] }
         let textLength = (string as NSString).length
         let origin = textContainerOrigin
@@ -814,6 +917,7 @@ final class MarkdownTextView: NSTextView {
                 height: block.height + 6)
             cards.append(CodeCard(span: span, rect: rect))
         }
+        cachedCodeCards = cards
         return cards
     }
 
@@ -853,16 +957,24 @@ final class MarkdownTextView: NSTextView {
         }
     }
 
-    private func drawCodeControls(_ cards: [CodeCard]) {
+    private func updateCopyButton(_ cards: [CodeCard]) {
         let hoveredCard = cards.first(where: controlsVisible)
-        copyButton.isHidden = hoveredCard == nil
+        let hidden = hoveredCard == nil
+        if copyButton.isHidden != hidden { copyButton.isHidden = hidden }
         if let hoveredCard {
-            copyButton.frame = copyControlRect(for: hoveredCard)
-            copyButton.image = NSImage(
-                systemSymbolName: copiedBlock == hoveredCard.span.range.location
-                    ? "checkmark" : "doc.on.doc",
-                accessibilityDescription: "Copy code")
+            let frame = copyControlRect(for: hoveredCard)
+            if copyButton.frame != frame { copyButton.frame = frame }
+            let symbol = copiedBlock == hoveredCard.span.range.location
+                ? "checkmark" : "doc.on.doc"
+            if copySymbol != symbol {
+                copyButton.image = NSImage(
+                    systemSymbolName: symbol, accessibilityDescription: "Copy code")
+                copySymbol = symbol
+            }
         }
+    }
+
+    private func drawCodeControls(_ cards: [CodeCard]) {
         guard let coord = coordinator else { return }
         let isDark = coord.appliedTextColor.luminance > 0.5
         let ink =
@@ -973,6 +1085,7 @@ final class MarkdownTextView: NSTextView {
     private func setHovered(_ block: Int?) {
         guard block != hoveredBlock else { return }
         hoveredBlock = block
+        updateCopyButton(codeCards())
         needsDisplay = true
     }
 
@@ -1117,9 +1230,11 @@ final class MarkdownTextView: NSTextView {
             (string as NSString).substring(with: range), forType: .string)
         copiedBlock = span.range.location
         coordinator?.parent.onCopy()
+        updateCopyButton(codeCards())
         needsDisplay = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
             self?.copiedBlock = nil
+            if let self { self.updateCopyButton(self.codeCards()) }
             self?.needsDisplay = true
         }
     }
