@@ -182,6 +182,46 @@ public enum MarkdownEditing {
         return NSRange(location: selection.location + 1, length: 0)
     }
 
+    public static func continueQuote(in text: String, selection: NSRange) -> TextEdit? {
+        let ns = text as NSString
+        guard selection.length == 0, selection.location <= ns.length else { return nil }
+        let lineRange = ns.lineRange(for: selection)
+        var contentRange = lineRange
+        while contentRange.length > 0 {
+            let character = ns.character(at: NSMaxRange(contentRange) - 1)
+            guard character == 0x0A || character == 0x0D else { break }
+            contentRange.length -= 1
+        }
+        let line = ns.substring(with: contentRange) as NSString
+        let indent = String((line as String).prefix { $0 == " " })
+        guard indent.count <= 3 else { return nil }
+        var prefixEnd = indent.utf16.count
+        var depth = 0
+        while prefixEnd < line.length, line.character(at: prefixEnd) == 0x3E {
+            depth += 1
+            prefixEnd += 1
+            if prefixEnd < line.length,
+                line.character(at: prefixEnd) == 0x20 || line.character(at: prefixEnd) == 0x09
+            { prefixEnd += 1 }
+        }
+        guard depth > 0, selection.location >= contentRange.location + prefixEnd else { return nil }
+        let inCode = MarkdownAnalyzer.spans(in: text).contains { span in
+            guard case .codeBlock = span.kind else { return false }
+            return span.range.location <= lineRange.location && selection.location <= NSMaxRange(span.range)
+        }
+        guard !inCode else { return nil }
+        if line.substring(from: prefixEnd).trimmingCharacters(in: .whitespaces).isEmpty {
+            return TextEdit(range: contentRange, replacement: "",
+                            selection: NSRange(location: contentRange.location, length: 0))
+        }
+        var prefix = line.substring(to: prefixEnd)
+        if prefix.hasSuffix(">") { prefix += " " }
+        let insertion = (text.contains("\r\n") ? "\r\n" : "\n") + prefix
+        return TextEdit(
+            range: selection, replacement: insertion,
+            selection: NSRange(location: selection.location + insertion.utf16.count, length: 0))
+    }
+
     /// Return pressed with the caret in a list item: continue the list, or end it if the item is empty.
     public static func continueList(in text: String, selection: NSRange) -> TextEdit? {
         guard selection.length == 0 else { return nil }

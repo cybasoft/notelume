@@ -179,6 +179,9 @@ struct MarkdownEditor: NSViewRepresentable {
         var checkboxSpans: [MarkdownSpan] {
             cachedSpans.filter { if case .checkbox = $0.kind { true } else { false } }
         }
+        var blockQuoteSpans: [MarkdownSpan] {
+            cachedSpans.filter { if case .blockQuote = $0.kind { true } else { false } }
+        }
 
         init(_ parent: MarkdownEditor) { self.parent = parent }
 
@@ -310,6 +313,7 @@ struct MarkdownEditor: NSViewRepresentable {
             switch selector {
             case #selector(NSResponder.insertNewline(_:)):
                 if let edit = MarkdownEditing.continueList(in: text, selection: tv.selectedRange())
+                    ?? MarkdownEditing.continueQuote(in: text, selection: tv.selectedRange())
                 {
                     tv.apply(edit)
                     return true
@@ -500,6 +504,10 @@ struct MarkdownEditor: NSViewRepresentable {
             for span in cachedSpans {
                 for r in span.syntax where NSMaxRange(r) <= storage.length {
                     if visual, case .checkbox = span.kind { continue }
+                    if visual, case .blockQuote = span.kind {
+                        setColor(.clear, in: storage, range: r)
+                        continue
+                    }
                     let rawCode: Bool
                     if case .codeBlock = span.kind {
                         rawCode = rawCodeBlocks.contains(span.range.location)
@@ -670,11 +678,16 @@ struct MarkdownEditor: NSViewRepresentable {
                 if visual {
                     p.headIndent = 12
                     p.firstLineHeadIndent = 12
+                    if let marker = span.syntax.first {
+                        let width = ((storage.string as NSString).substring(with: marker) as NSString)
+                            .size(withAttributes: [.font: baseFont()]).width
+                        p.headIndent += width
+                    }
                 }
                 storage.addAttributes(
                     [
-                        .foregroundColor: NSColor.secondaryLabelColor, .paragraphStyle: p,
-                        .qnForegroundRole: ForegroundRole.fixed,
+                        .foregroundColor: parent.textColor, .paragraphStyle: p,
+                        .qnForegroundRole: ForegroundRole.body,
                     ], range: r)
             case .listMarker:
                 setColor(accent, in: storage, range: r)
@@ -781,6 +794,7 @@ final class MarkdownTextView: NSTextView {
     private var hoveredBlock: Int?
     private var copiedBlock: Int?
     private var cachedCodeCards: [CodeCard]?
+    private var cachedQuoteBars: [NSRect]?
     private var copySymbol = ""
     private var slashMenu: SlashMenuState?
     private weak var observedWindow: NSWindow?
@@ -804,6 +818,7 @@ final class MarkdownTextView: NSTextView {
         let cards = codeCards()
         drawCodeBackgrounds(cards, in: dirtyRect)
         super.draw(dirtyRect)
+        drawQuoteBars(in: dirtyRect)
         drawCodeControls(cards)
         drawThematicBreaks()
         drawImagePreviews()
@@ -824,6 +839,7 @@ final class MarkdownTextView: NSTextView {
 
     func invalidateCodeCards() {
         cachedCodeCards = nil
+        cachedQuoteBars = nil
     }
 
     private func updateCheckboxButtons() {
@@ -1035,6 +1051,36 @@ final class MarkdownTextView: NSTextView {
             NSColor.labelColor.withAlphaComponent(0.08).setFill()
             backing.fill()
             image.draw(in: rect)
+        }
+    }
+
+    private func drawQuoteBars(in dirtyRect: NSRect) {
+        guard let coordinator, coordinator.isVisual, let layoutManager, let textContainer else { return }
+        if cachedQuoteBars == nil {
+            let quotes = coordinator.blockQuoteSpans
+            let origin = textContainerOrigin
+            var bars: [NSRect] = []
+            for span in quotes where NSMaxRange(span.range) <= (string as NSString).length {
+                let glyphs = layoutManager.glyphRange(forCharacterRange: span.range, actualCharacterRange: nil)
+                var block = NSRect.null
+                layoutManager.enumerateLineFragments(forGlyphRange: glyphs) { _, usedRect, _, _, _ in
+                    block = block.union(usedRect)
+                }
+                guard !block.isNull else { continue }
+                let depth = quotes.filter {
+                    $0.range != span.range && $0.range.location <= span.range.location
+                        && NSMaxRange($0.range) >= NSMaxRange(span.range)
+                }.count
+                bars.append(NSRect(
+                    x: origin.x + 4 + CGFloat(depth) * 14,
+                    y: origin.y + block.minY + 1, width: 3,
+                    height: max(4, block.height - 2)))
+            }
+            cachedQuoteBars = bars
+        }
+        NSColor.controlAccentColor.withAlphaComponent(0.9).setFill()
+        for rect in cachedQuoteBars ?? [] where rect.intersects(dirtyRect) {
+            NSBezierPath(roundedRect: rect, xRadius: 1.5, yRadius: 1.5).fill()
         }
     }
 

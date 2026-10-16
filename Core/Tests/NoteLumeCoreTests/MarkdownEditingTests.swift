@@ -8,6 +8,44 @@ import Testing
         ((s as NSString).replacingCharacters(in: e.range, with: e.replacement), e.selection)
     }
 
+    @Test func continuesQuotedParagraphs() throws {
+        for text in ["> This is a block", "  > Quote", "> > Nested", ">No space", "> caf\u{00E9} \u{1F600}"] {
+            let edit = try #require(MarkdownEditing.continueQuote(
+                in: text, selection: NSRange(location: text.utf16.count, length: 0)))
+            let prefix = text.hasPrefix("  ") ? "  > " : (text.hasPrefix("> >") ? "> > " : "> ")
+            #expect(apply(edit, to: text).0 == text + "\n" + prefix)
+            #expect(edit.selection.location == (text + "\n" + prefix).utf16.count)
+        }
+    }
+
+    @Test func emptyQuoteEndsQuotedParagraph() throws {
+        let text = "> First line\n> "
+        let edit = try #require(MarkdownEditing.continueQuote(
+            in: text, selection: NSRange(location: text.utf16.count, length: 0)))
+        #expect(apply(edit, to: text).0 == "> First line\n")
+        #expect(edit.selection.location == "> First line\n".utf16.count)
+    }
+
+    @Test func quoteReturnSplitsLineAndPreservesLineEndings() throws {
+        let text = "> first second"
+        let split = try #require(MarkdownEditing.continueQuote(
+            in: text, selection: NSRange(location: 8, length: 0)))
+        #expect(apply(split, to: text).0 == "> first \n> second")
+        let windows = "> first\r\n> second"
+        let edit = try #require(MarkdownEditing.continueQuote(
+            in: windows, selection: NSRange(location: windows.utf16.count, length: 0)))
+        #expect(apply(edit, to: windows).0 == windows + "\r\n> ")
+    }
+
+    @Test func quoteContinuationLeavesOtherContentAlone() {
+        for text in ["plain", "- list", "    > indented code", "```bash\n> output"] {
+            #expect(MarkdownEditing.continueQuote(
+                in: text, selection: NSRange(location: text.utf16.count, length: 0)) == nil)
+        }
+        #expect(MarkdownEditing.continueQuote(in: "> Quote", selection: NSRange(location: 0, length: 0)) == nil)
+        #expect(MarkdownEditing.continueQuote(in: "> Quote", selection: NSRange(location: 2, length: 3)) == nil)
+    }
+
     @Test func continuesBullets() {
         let s = "- one"
         let e = MarkdownEditing.continueList(in: s, selection: NSRange(location: 5, length: 0))!
