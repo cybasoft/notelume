@@ -64,6 +64,29 @@ private struct EditorSettings: View {
                 ForEach(EditorMode.allCases) { Text($0.title).tag($0) }
             }
             .pickerStyle(.radioGroup)
+            Section("Code blocks") {
+                Picker("Font", selection: $settings.codeFontFamily) {
+                    Text("System Monospaced").tag("")
+                    ForEach(CodeFont.families, id: \.self) { family in
+                        Text(family).tag(family)
+                    }
+                    if !settings.codeFontFamily.isEmpty,
+                        !CodeFont.families.contains(settings.codeFontFamily)
+                    {
+                        Text("\(settings.codeFontFamily) (Unavailable)").tag(settings.codeFontFamily)
+                    }
+                }
+                Stepper(value: $settings.codeFontSize, in: 10...24, step: 1) {
+                    LabeledContent("Size", value: "\(Int(settings.codeFontSize)) pt")
+                }
+                Text("let message = \"Hello\"")
+                    .font(Font(CodeFont.font(family: settings.codeFontFamily, size: settings.codeFontSize)))
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(8)
+                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 4))
+                    .accessibilityLabel("Code font preview")
+            }
             Text("Both modes edit the same Markdown. Switching never changes your text. Metadata (labels, color, reminder) stays hidden above the note body and is preserved on save.")
                 .font(.caption).foregroundStyle(.secondary)
             Text("Shortcuts: ⌘B bold, ⌘I italic, ⌘E code. Click a checkbox to toggle it. ⌘-click a link to open it.")

@@ -48,6 +48,9 @@ struct NoteEditorView: View {
                 revision: session.revision,
                 mode: mode,
                 textColor: textColor,
+                codeFont: CodeFont.font(
+                    family: model.settings?.codeFontFamily ?? "",
+                    size: model.settings?.codeFontSize ?? 13),
                 labels: model.labelCounts.map(\.label),
                 notesDirectory: model.store?.notesDirectory,
                 searchQuery: showFindBar ? findQuery : "",

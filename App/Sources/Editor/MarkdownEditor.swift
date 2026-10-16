@@ -19,6 +19,7 @@ struct MarkdownEditor: NSViewRepresentable {
     let revision: Int
     let mode: EditorMode
     let textColor: NSColor
+    var codeFont: NSFont = .monospacedSystemFont(ofSize: 13, weight: .regular)
     let labels: [String]
     let notesDirectory: URL?
     let searchQuery: String
@@ -109,6 +110,7 @@ struct MarkdownEditor: NSViewRepresentable {
         private var appliedRevision = -1
         private var appliedMode: EditorMode?
         private var appliedColor: NSColor?
+        private var appliedCodeFont: NSFont?
         private var isProgrammatic = false
         private var cachedText: String?
         private var cachedSpans: [MarkdownSpan] = []
@@ -205,9 +207,10 @@ struct MarkdownEditor: NSViewRepresentable {
                 restyle(force: true)
                 return
             }
-            if appliedMode != parent.mode {
+            let modeChanged = appliedMode != parent.mode
+            if modeChanged || appliedCodeFont != parent.codeFont {
                 restyle(force: true)
-                notifyRawModeChange()
+                if modeChanged { notifyRawModeChange() }
             } else if appliedColor != parent.textColor {
                 updateTextColors()
             }
@@ -483,6 +486,7 @@ struct MarkdownEditor: NSViewRepresentable {
             }
             appliedMode = parent.mode
             appliedColor = parent.textColor
+            appliedCodeFont = parent.codeFont
 
             let ns = text as NSString
             let sel = tv.selectedRange()
@@ -607,8 +611,7 @@ struct MarkdownEditor: NSViewRepresentable {
                 codePara.lineBreakMode = .byWordWrapping
                 storage.addAttributes(
                     [
-                        .font: NSFont.monospacedSystemFont(
-                            ofSize: baseSize * 0.92, weight: .regular),
+                        .font: parent.codeFont,
                         .paragraphStyle: codePara,
                     ], range: r)
                 let text = storage.string as NSString
@@ -710,25 +713,25 @@ struct MarkdownEditor: NSViewRepresentable {
         private static func tokenColor(_ kind: CodeToken.Kind, isDark: Bool) -> NSColor {
             if isDark {
                 switch kind {
-                case .keyword: return NSColor(srgbRed: 0.98, green: 0.45, blue: 0.65, alpha: 1.0)
+                case .keyword: return NSColor(srgbRed: 0.42, green: 0.80, blue: 0.93, alpha: 1.0)
                 case .command: return NSColor(srgbRed: 0.40, green: 0.78, blue: 1.00, alpha: 1.0)
                 case .string: return NSColor(srgbRed: 0.98, green: 0.68, blue: 0.45, alpha: 1.0)
                 case .comment: return NSColor(srgbRed: 0.55, green: 0.60, blue: 0.65, alpha: 1.0)
                 case .number: return NSColor(srgbRed: 0.80, green: 0.88, blue: 0.55, alpha: 1.0)
                 case .variable: return NSColor(srgbRed: 0.85, green: 0.62, blue: 1.00, alpha: 1.0)
-                case .type: return NSColor(srgbRed: 0.45, green: 0.85, blue: 0.80, alpha: 1.0)
-                case .property: return NSColor(srgbRed: 0.55, green: 0.80, blue: 1.00, alpha: 1.0)
+                case .type: return NSColor(srgbRed: 0.68, green: 0.82, blue: 0.43, alpha: 1.0)
+                case .property: return NSColor(srgbRed: 0.40, green: 0.78, blue: 1.00, alpha: 1.0)
                 case .tag: return NSColor(srgbRed: 0.95, green: 0.45, blue: 0.55, alpha: 1.0)
                 }
             } else {
                 switch kind {
-                case .keyword: return NSColor(srgbRed: 0.65, green: 0.10, blue: 0.45, alpha: 1.0)
+                case .keyword: return NSColor(srgbRed: 0.05, green: 0.36, blue: 0.58, alpha: 1.0)
                 case .command: return NSColor(srgbRed: 0.10, green: 0.42, blue: 0.78, alpha: 1.0)
                 case .string: return NSColor(srgbRed: 0.75, green: 0.28, blue: 0.10, alpha: 1.0)
                 case .comment: return NSColor(srgbRed: 0.45, green: 0.50, blue: 0.55, alpha: 1.0)
                 case .number: return NSColor(srgbRed: 0.12, green: 0.55, blue: 0.25, alpha: 1.0)
                 case .variable: return NSColor(srgbRed: 0.50, green: 0.20, blue: 0.75, alpha: 1.0)
-                case .type: return NSColor(srgbRed: 0.10, green: 0.48, blue: 0.52, alpha: 1.0)
+                case .type: return NSColor(srgbRed: 0.28, green: 0.44, blue: 0.10, alpha: 1.0)
                 case .property: return NSColor(srgbRed: 0.18, green: 0.38, blue: 0.68, alpha: 1.0)
                 case .tag: return NSColor(srgbRed: 0.70, green: 0.15, blue: 0.35, alpha: 1.0)
                 }
@@ -992,7 +995,7 @@ final class MarkdownTextView: NSTextView {
                 let text = String(number)
                 number += 1
                 let attrs: [NSAttributedString.Key: Any] = [
-                    .font: NSFont.monospacedSystemFont(ofSize: 10, weight: .regular),
+                    .font: coord.parent.codeFont.withSize(max(10, coord.parent.codeFont.pointSize - 2)),
                     .foregroundColor: ink.withAlphaComponent(0.55),
                 ]
                 (text as NSString).draw(

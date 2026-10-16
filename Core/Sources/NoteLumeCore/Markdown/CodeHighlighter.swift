@@ -34,6 +34,7 @@ public enum CodeHighlighter {
         case html
         case css
         case sql
+        case php
         case generic
     }
 
@@ -62,6 +63,8 @@ public enum CodeHighlighter {
             return .css
         case "sql":
             return .sql
+        case "php", "php8", "phtml":
+            return .php
         default:
             return .generic
         }
@@ -117,6 +120,7 @@ public enum CodeHighlighter {
     private static func tokenize(code: String, language: Language) -> [CodeToken] {
         var tokens: [CodeToken] = []
         var occupied = IndexSet()
+        var protected = IndexSet()
 
         func collect(regex: NSRegularExpression, kind: CodeToken.Kind, group: Int = 0, allowInOccupied: Bool = false) {
             let ns = code as NSString
@@ -126,7 +130,9 @@ public enum CodeHighlighter {
                 let r = match.range(at: group)
                 guard r.location != NSNotFound, r.length > 0 else { return }
                 guard let range = Range(r) else { return }
-                if allowInOccupied || !occupied.intersects(integersIn: range) {
+                if (allowInOccupied || !occupied.intersects(integersIn: range)),
+                    !protected.intersects(integersIn: range)
+                {
                     tokens.append(CodeToken(kind: kind, range: r))
                     occupied.insert(integersIn: range)
                 }
@@ -135,20 +141,27 @@ public enum CodeHighlighter {
 
         switch language {
         case .bash:
-            // 1. Strings first so hashes inside quotes are not treated as comments
-            collect(regex: Regexes.bashSingleQuotes, kind: .string)
-            collect(regex: Regexes.bashDoubleQuotes, kind: .string)
-            collect(regex: Regexes.bashBackticks, kind: .string)
-
-            // 2. Comments
-            collect(regex: Regexes.bashComments, kind: .comment)
+            let ns = code as NSString
+            Regexes.bashLiterals.enumerateMatches(
+                in: code, range: NSRange(location: 0, length: ns.length)
+            ) { match, _, _ in
+                guard let range = match?.range, let indexes = Range(range) else { return }
+                let literal = ns.substring(with: range)
+                let comment = literal.hasPrefix("#")
+                let kind: CodeToken.Kind = literal.hasPrefix("#!") && range.location == 0
+                    ? .property : (comment ? .comment : .string)
+                tokens.append(CodeToken(kind: kind, range: range))
+                occupied.insert(integersIn: indexes)
+                if comment || literal.hasPrefix("'") { protected.insert(integersIn: indexes) }
+            }
 
             // 3. Variables (can appear inside double quotes or standalone)
             collect(regex: Regexes.bashVariables, kind: .variable, allowInOccupied: true)
 
-            // 4. Flags, keywords, numbers. Command names stay in the default color.
+            // 4. Flags, keywords, commands and numbers.
             collect(regex: Regexes.bashFlags, kind: .property, group: 1)
             collect(regex: Regexes.bashKeywords, kind: .keyword)
+            collect(regex: Regexes.bashCommands, kind: .command, group: 1)
             collect(regex: Regexes.numbers, kind: .number)
 
         case .swift:
@@ -217,7 +230,30 @@ public enum CodeHighlighter {
             collect(regex: Regexes.doubleQuoteStrings, kind: .string)
             collect(regex: Regexes.singleQuoteStrings, kind: .string)
             collect(regex: Regexes.cssProperties, kind: .property, group: 1)
+            collect(regex: Regexes.cssSelectors, kind: .type)
             collect(regex: Regexes.cssColors, kind: .number)
+            collect(regex: Regexes.cssAtRules, kind: .keyword)
+            collect(regex: Regexes.functionCalls, kind: .command, group: 1)
+            collect(regex: Regexes.numbers, kind: .number)
+
+        case .php:
+            let ns = code as NSString
+            Regexes.phpLiterals.enumerateMatches(
+                in: code, range: NSRange(location: 0, length: ns.length)
+            ) { match, _, _ in
+                guard let range = match?.range, let indexes = Range(range) else { return }
+                let literal = ns.substring(with: range)
+                let comment = literal.hasPrefix("//") || literal.hasPrefix("/*") || literal.hasPrefix("#")
+                tokens.append(CodeToken(kind: comment ? .comment : .string, range: range))
+                occupied.insert(integersIn: indexes)
+            }
+            collect(regex: Regexes.phpTags, kind: .tag)
+            collect(regex: Regexes.phpVariables, kind: .variable)
+            collect(regex: Regexes.phpKeywords, kind: .keyword)
+            collect(regex: Regexes.phpDeclarations, kind: .type, group: 1)
+            collect(regex: Regexes.phpBuiltins, kind: .command)
+            collect(regex: Regexes.functionCalls, kind: .command, group: 1)
+            collect(regex: Regexes.types, kind: .type)
             collect(regex: Regexes.numbers, kind: .number)
 
         case .sql:
@@ -243,12 +279,11 @@ public enum CodeHighlighter {
 
     private enum Regexes {
         static let bashComments = try! NSRegularExpression(pattern: "(?m)#.*$")
-        static let bashDoubleQuotes = try! NSRegularExpression(pattern: "\"(\\\\.|[^\"\\\\])*\"")
-        static let bashSingleQuotes = try! NSRegularExpression(pattern: "'[^']*'")
-        static let bashBackticks = try! NSRegularExpression(pattern: "`(\\\\.|[^`\\\\])*`")
+        static let bashLiterals = try! NSRegularExpression(pattern: #"\A#![^\r\n]*|'[^']*'|"(?:\\.|[^"\\])*"|`(?:\\.|[^`\\])*`|#[^\r\n]*"#)
         static let bashVariables = try! NSRegularExpression(pattern: "\\$([a-zA-Z_][a-zA-Z0-9_]*|\\{[^}]+\\}|[0-9?*@#$!-])")
         static let bashKeywords = try! NSRegularExpression(pattern: "\\b(if|then|else|elif|fi|case|esac|for|select|while|until|do|done|in|function|time|return|exit|break|continue|local|export|readonly|declare|typeset|set|unset|shift)\\b")
         static let bashFlags = try! NSRegularExpression(pattern: "(?:\\s|^)(--?[a-zA-Z0-9_-]+)")
+        static let bashCommands = try! NSRegularExpression(pattern: "(?m)(?:^|[;|&])[ \\t]*([a-zA-Z_][a-zA-Z0-9_./-]*)(?=[ \\t]|$)")
 
         static let slashSlashComments = try! NSRegularExpression(pattern: "(?m)//.*$")
         static let slashStarComments = try! NSRegularExpression(pattern: "/\\*[\\s\\S]*?\\*/")
@@ -285,8 +320,18 @@ public enum CodeHighlighter {
         static let htmlTags = try! NSRegularExpression(pattern: "</?[a-zA-Z0-9:-]+|/?>")
         static let htmlAttributes = try! NSRegularExpression(pattern: "\\b([a-zA-Z0-9:-]+)(?=\\=)")
 
-        static let cssProperties = try! NSRegularExpression(pattern: "(?m)^[ \\t]*([a-zA-Z0-9_-]+)(?=\\s*:)")
+        static let cssProperties = try! NSRegularExpression(pattern: "(?m)(?:^|[;{])[ \\t]*([a-zA-Z_-][a-zA-Z0-9_-]*)(?=\\s*:)")
         static let cssColors = try! NSRegularExpression(pattern: "#[0-9a-fA-F]{3,8}\\b")
+        static let cssSelectors = try! NSRegularExpression(pattern: "[.#][a-zA-Z_][a-zA-Z0-9_-]*(?=[^;{}]*\\{)|[a-zA-Z][a-zA-Z0-9_-]*(?=[ \\t]*[,{])")
+        static let cssAtRules = try! NSRegularExpression(pattern: "@[a-zA-Z-]+|!important\\b")
+        static let functionCalls = try! NSRegularExpression(pattern: "\\b([a-zA-Z_][a-zA-Z0-9_]*)(?=\\s*\\()")
+
+        static let phpLiterals = try! NSRegularExpression(pattern: #""(?:\\.|[^"\\\r\n])*"|'(?:\\.|[^'\\\r\n])*'|/\*[\s\S]*?\*/|//[^\r\n]*|#[^\r\n]*"#)
+        static let phpTags = try! NSRegularExpression(pattern: "<\\?(?:php|=)?|\\?>", options: .caseInsensitive)
+        static let phpVariables = try! NSRegularExpression(pattern: "\\$[a-zA-Z_][a-zA-Z0-9_]*")
+        static let phpKeywords = try! NSRegularExpression(pattern: "\\b(class|function|fn|public|protected|private|static|final|abstract|extends|implements|interface|trait|namespace|use|new|return|if|else|elseif|foreach|for|while|do|switch|case|default|break|continue|try|catch|finally|throw|match|yield|as|instanceof|const|var|readonly|true|false|null)\\b", options: .caseInsensitive)
+        static let phpDeclarations = try! NSRegularExpression(pattern: "\\b(?:function\\s+&?\\s*|(?:class|interface|trait)\\s+)([a-zA-Z_][a-zA-Z0-9_]*)", options: .caseInsensitive)
+        static let phpBuiltins = try! NSRegularExpression(pattern: "\\b(echo|print|isset|empty|unset|include|include_once|require|require_once|array|list|exit|die)\\b", options: .caseInsensitive)
 
         static let sqlKeywords = try! NSRegularExpression(pattern: "(?i)\\b(SELECT|FROM|WHERE|INSERT|INTO|UPDATE|DELETE|CREATE|TABLE|DROP|ALTER|JOIN|LEFT|RIGHT|INNER|OUTER|FULL|ON|GROUP|BY|ORDER|HAVING|LIMIT|OFFSET|UNION|ALL|DISTINCT|AS|AND|OR|NOT|IN|IS|NULL|LIKE|BETWEEN|EXISTS|CASE|WHEN|THEN|ELSE|END|PRIMARY|KEY|FOREIGN|REFERENCES|INDEX|VIEW|TRIGGER|DEFAULT|CHECK|VALUES|SET|WITH|TRUE|FALSE)\\b")
 

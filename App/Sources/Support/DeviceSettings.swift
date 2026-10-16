@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Observation
 import NoteLumeCore
@@ -12,6 +13,23 @@ enum CollectionLayout: String, CaseIterable, Identifiable {
     case stacked, tiled
     var id: String { rawValue }
     var title: String { self == .stacked ? "Stacked" : "Tiled" }
+}
+
+@MainActor
+enum CodeFont {
+    static let families: [String] = NSFontManager.shared.availableFontFamilies.filter { family in
+        NSFontManager.shared.font(withFamily: family, traits: [], weight: 5, size: 13)?.isFixedPitch == true
+    }.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+
+    static func font(family: String, size: Double) -> NSFont {
+        let size = CGFloat(size.isFinite ? min(24, max(10, size)) : 13)
+        if !family.isEmpty,
+            let font = NSFontManager.shared.font(withFamily: family, traits: [], weight: 5, size: size)
+        {
+            return font
+        }
+        return .monospacedSystemFont(ofSize: size, weight: .regular)
+    }
 }
 
 enum StickyPlacement: String, CaseIterable, Identifiable {
@@ -63,6 +81,8 @@ final class DeviceSettings {
     var editorMode: EditorMode { didSet { save("editorMode", editorMode.rawValue) } }
     var defaultNoteColor: String? { didSet { save("defaultNoteColor", defaultNoteColor ?? "") } }
     var defaultTextColor: String? { didSet { save("defaultTextColor", defaultTextColor ?? "") } }
+    var codeFontFamily: String { didSet { save("codeFontFamily", codeFontFamily) } }
+    var codeFontSize: Double { didSet { save("codeFontSize", String(codeFontSize)) } }
     var layout: CollectionLayout { didSet { save("layout", layout.rawValue) } }
     var tileSize: Double { didSet { save("tileSize", String(tileSize)) } }
     var showPreviews: Bool { didSet { save("showPreviews", showPreviews ? "1" : "0") } }
@@ -82,6 +102,9 @@ final class DeviceSettings {
         editorMode = EditorMode(rawValue: get("editorMode") ?? "") ?? .visual
         defaultNoteColor = get("defaultNoteColor").flatMap { $0.isEmpty ? nil : $0 }
         defaultTextColor = get("defaultTextColor").flatMap { $0.isEmpty ? nil : $0 }
+        codeFontFamily = get("codeFontFamily") ?? ""
+        let fontSize = Double(get("codeFontSize") ?? "13") ?? 13
+        codeFontSize = fontSize.isFinite ? min(24, max(10, fontSize)) : 13
         layout = CollectionLayout(rawValue: get("layout") ?? "") ?? .stacked
         tileSize = Double(get("tileSize") ?? "") ?? 200
         showPreviews = (get("showPreviews") ?? "1") == "1"
