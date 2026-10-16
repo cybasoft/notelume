@@ -149,6 +149,73 @@ repository, and the repository's default branch. It does not publish artifacts
 from an earlier local build; move the existing directory aside to rebuild, or
 publish the tested artifacts manually with their exact source commit.
 
+## Homebrew Distribution
+
+NoteLume is distributed through the project's
+[Homebrew tap](https://github.com/cybasoft/homebrew-tap), alongside PassBar.
+This is a third-party tap, not the official `homebrew/cask` repository.
+The tap must be public for installation without GitHub credentials. At the time
+of this setup, `cybasoft/homebrew-tap` is private; publishing the cask there does
+not make it publicly installable. Review and change repository visibility in
+GitHub before announcing public Homebrew availability. Users can then install
+NoteLume with:
+
+```bash
+brew install --cask cybasoft/tap/notelume
+```
+
+The cask lives in `Casks/notelume.rb` in the separate `homebrew-tap`
+repository (locally, `../homebrew-tap` beside this repository). The release
+script publishes GitHub assets only; it does not update or push the tap.
+
+After publishing each stable GitHub release:
+
+1. Confirm the release is public and includes `NoteLume-X.Y.Z.dmg` and
+  `SHA256SUMS.txt`. The cask's versioned URL must point to the DMG, not the ZIP.
+2. Download and verify the published DMG. For example, from a temporary
+  directory for version `1.0.1`:
+
+  ```bash
+  curl --fail --location --remote-name https://github.com/cybasoft/notelume/releases/download/v1.0.1/NoteLume-1.0.1.dmg
+  curl --fail --location --remote-name https://github.com/cybasoft/notelume/releases/download/v1.0.1/SHA256SUMS.txt
+  grep '  NoteLume-1.0.1.dmg$' SHA256SUMS.txt | shasum -a 256 --check
+  shasum -a 256 NoteLume-1.0.1.dmg
+  ```
+
+3. Update `version` and `sha256` in `Casks/notelume.rb` to match that published
+  DMG. Keep `app "NoteLume.app"` and the macOS requirement aligned with the
+  release. Do not replace an existing release's DMG after updating the cask;
+  publish a new version instead.
+4. Run these checks from the tap repository:
+
+  ```bash
+  ruby -c Casks/notelume.rb
+  brew style Casks/notelume.rb
+  brew audit --cask --online cybasoft/tap/notelume
+  brew fetch --cask cybasoft/tap/notelume
+  brew livecheck --cask cybasoft/tap/notelume
+  ```
+
+  The fully qualified commands read Homebrew's installed tap checkout. Run
+  `brew tap cybasoft/tap` if needed, then use `brew --repository cybasoft/tap`
+  to locate it and ensure it contains the cask revision being tested. For an
+  already-pushed cask, run `brew update` to refresh a stale checkout before
+  validation. Running the commands from a separate development clone does not
+  make Homebrew use that clone.
+  `brew fetch` verifies the downloaded artifact against the cask checksum;
+  it does not install the app.
+5. On a test Mac, install with `brew install --cask cybasoft/tap/notelume`.
+  Verify launch, Gatekeeper acceptance, and an upgrade from the preceding
+  version when one exists. Do not overwrite an existing manual installation
+  or remove user data just to run this check.
+6. Commit and push the reviewed cask change to `cybasoft/homebrew-tap` after
+  validation. This is a separate publication step from the app release.
+
+For later updates, users run `brew update` followed by
+`brew upgrade --cask cybasoft/tap/notelume`. Ordinary uninstall removes the
+app; `brew uninstall --cask --zap` also removes the paths listed in the cask.
+Never add a user-selected notes folder to the cask's `zap` paths.
+
 ## Licensing and Third-Party Notices
 
 The community edition of NoteLume is licensed under **GPL-3.0-only**. See the [LICENSE](../LICENSE) file for the complete license terms.

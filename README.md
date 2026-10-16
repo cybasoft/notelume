@@ -21,7 +21,13 @@ macOS 14 or later.
 
 ## Install
 
-When a release is available, download the signed, notarized disk image from
+With [Homebrew](https://brew.sh/):
+
+```bash
+brew install --cask cybasoft/tap/notelume
+```
+
+Or download the signed, notarized disk image from
 [GitHub Releases](https://github.com/cybasoft/notelume/releases), open it, and
 drag NoteLume to Applications.
 
