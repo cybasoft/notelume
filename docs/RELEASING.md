@@ -19,6 +19,20 @@ Install the required tools:
 brew install xcodegen gh
 ```
 
+## Repository Layout
+
+- `App/` contains the sandboxed SwiftUI macOS application. XcodeGen generates
+  its project from `App/project.yml`; the app targets macOS 14 and later.
+- `Core/` contains the `NoteLumeCore` Swift package: note format and storage,
+  indexing, reconciliation, edit sessions, and reminders. Its FSEvents watcher
+  is compiled only on macOS.
+- `docs/` contains the note format and backup/recovery guides, alongside this
+  build and release guide.
+
+Run `swift test --package-path Core` from the repository root to test the core
+package. See [CONTRIBUTING.md](../CONTRIBUTING.md) for contributor requirements
+and checks.
+
 Select the full Xcode installation if necessary:
 
 ```bash

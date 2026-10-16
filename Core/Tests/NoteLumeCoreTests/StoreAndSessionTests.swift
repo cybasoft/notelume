@@ -16,6 +16,30 @@ func makeStore(_ sb: Sandbox) throws -> NoteStore {
 }
 
 @Suite struct StoreTests {
+    @Test(arguments: [
+        "# No frontmatter\n",
+        "---\ntitle: No ID\n---\nbody",
+        "---\nschema: 999\n---\nbody",
+        "---\nid: bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\n---\nbody",
+        "---\nbroken: [unterminated\n---\nbody",
+        "---\ntitle: Unterminated\nbody",
+        "---\nopacity: not-a-number\ncolor: not-a-color\nreminder: not-a-date\n---\nbody",
+    ])
+    func indexedMetadataEdgeCasesOpenByFilenameID(text: String) async throws {
+        let sandbox = try Sandbox()
+        let store = try makeStore(sandbox)
+        let filenameID = UUID()
+        try sandbox.writeRaw(text, id: filenameID)
+        await store.reconcile()
+        let hits = try store.index.search(SearchQuery())
+        #expect(hits.map(\.id) == [filenameID])
+        for hit in hits {
+            let opened = try await store.load(hit.id)
+            #expect(opened.document.metadata.id == filenameID)
+            #expect(opened.document.serialize() == text)
+        }
+    }
+
     @Test(arguments: [false, true])
     func creationTextColorIsStoredPerNote(sticky: Bool) async throws {
         let sandbox = try Sandbox()
