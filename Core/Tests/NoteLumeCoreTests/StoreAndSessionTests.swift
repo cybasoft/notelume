@@ -16,6 +16,24 @@ func makeStore(_ sb: Sandbox) throws -> NoteStore {
 }
 
 @Suite struct StoreTests {
+    @Test(arguments: [false, true])
+    func creationTextColorIsStoredPerNote(sticky: Bool) async throws {
+        let sandbox = try Sandbox()
+        let store = try makeStore(sandbox)
+        let existing = try await store.create(body: "Existing", textColor: "#123456")
+        let note = try await store.create(
+            sticky: sticky, color: "#F5D76E", textColor: "#345678")
+        let reopened = try await store.load(note.document.metadata.id)
+        #expect(reopened.document.metadata.textColor == "#345678")
+        #expect(reopened.document.metadata.color == "#F5D76E")
+        #expect(reopened.document.metadata.sticky == sticky)
+        #expect(try store.index.summary(id: note.document.metadata.id)?.textColor == "#345678")
+        let automatic = try await store.create()
+        #expect(automatic.document.metadata.textColor == nil)
+        let unchanged = try await store.load(existing.document.metadata.id)
+        #expect(unchanged.document.metadata.textColor == "#123456")
+    }
+
     @Test func creationModeIsStoredPerNote() async throws {
         let sandbox = try Sandbox()
         let store = try makeStore(sandbox)

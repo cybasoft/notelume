@@ -121,6 +121,34 @@ public enum MarkdownEditing {
         return NSIntersectionRange(selection, range).length > 0
     }
 
+    public static func completeCodeFence(in text: String, selection: NSRange, typed: String) -> TextEdit? {
+        let ns = text as NSString
+        guard typed == "`", selection.length == 0,
+            selection.location >= 2, selection.location <= ns.length
+        else { return nil }
+        let line = ns.lineRange(for: selection)
+        let prefix = ns.substring(with: NSRange(
+            location: line.location, length: selection.location - line.location))
+        let indent = String(prefix.prefix { $0 == " " })
+        guard indent.count <= 3, prefix == indent + "``" else { return nil }
+        let suffix = ns.substring(with: NSRange(
+            location: selection.location, length: NSMaxRange(line) - selection.location))
+            .trimmingCharacters(in: .newlines)
+        guard suffix.isEmpty || suffix == "`" else { return nil }
+        let insideCode = MarkdownAnalyzer.spans(in: text).contains { span in
+            guard case .codeBlock = span.kind else { return false }
+            return span.range.location < line.location && selection.location <= NSMaxRange(span.range)
+        }
+        guard !insideCode else { return nil }
+        let newline = text.contains("\r\n") ? "\r\n" : "\n"
+        return TextEdit(
+            range: NSRange(location: selection.location, length: (suffix as NSString).length),
+            replacement: "`" + newline + indent + newline + indent + "```",
+            selection: NSRange(
+                location: selection.location + 1 + (newline as NSString).length + indent.utf16.count,
+                length: 0))
+    }
+
     public static func autoPair(in text: String, selection: NSRange, typed: String) -> TextEdit? {
         let pairs = ["(": ")", "[": "]", "{": "}", "\"": "\"", "'": "'", "`": "`"]
         guard let closing = pairs[typed], (typed as NSString).length == 1 else { return nil }

@@ -62,6 +62,7 @@ final class DeviceSettings {
 
     var editorMode: EditorMode { didSet { save("editorMode", editorMode.rawValue) } }
     var defaultNoteColor: String? { didSet { save("defaultNoteColor", defaultNoteColor ?? "") } }
+    var defaultTextColor: String? { didSet { save("defaultTextColor", defaultTextColor ?? "") } }
     var layout: CollectionLayout { didSet { save("layout", layout.rawValue) } }
     var tileSize: Double { didSet { save("tileSize", String(tileSize)) } }
     var showPreviews: Bool { didSet { save("showPreviews", showPreviews ? "1" : "0") } }
@@ -80,6 +81,7 @@ final class DeviceSettings {
         func get(_ k: String) -> String? { (try? index.setting(k)) ?? nil }
         editorMode = EditorMode(rawValue: get("editorMode") ?? "") ?? .visual
         defaultNoteColor = get("defaultNoteColor").flatMap { $0.isEmpty ? nil : $0 }
+        defaultTextColor = get("defaultTextColor").flatMap { $0.isEmpty ? nil : $0 }
         layout = CollectionLayout(rawValue: get("layout") ?? "") ?? .stacked
         tileSize = Double(get("tileSize") ?? "") ?? 200
         showPreviews = (get("showPreviews") ?? "1") == "1"

@@ -71,22 +71,26 @@ struct NoteCard: View {
             }
             if tiled { Spacer(minLength: 0) }
             HStack(spacing: 6) {
-                ForEach(note.labels.prefix(3), id: \.self) { l in
-                    Text(l).font(.caption2).padding(.horizontal, 6).padding(.vertical, 2)
-                        .background(fg.opacity(0.12), in: Capsule())
-                }
-                if note.labels.count > 3 { Text("+\(note.labels.count - 3)").font(.caption2).opacity(0.6) }
+                NoteCardLabels(labels: note.labels, foreground: fg)
                 Spacer(minLength: 0)
                 if let r = note.reminder {
-                    Label(r.formatted(date: .abbreviated, time: .shortened), systemImage: "bell")
-                        .font(.caption2)
-                        .foregroundStyle(r < Date() ? .red : fg.opacity(0.7))
+                    if tiled {
+                        Image(systemName: "bell")
+                            .font(.caption2)
+                            .foregroundStyle(r < Date() ? .red : fg.opacity(0.7))
+                            .help(r.formatted(date: .abbreviated, time: .shortened))
+                            .accessibilityLabel("Reminder: \(r.formatted(date: .abbreviated, time: .shortened))")
+                    } else {
+                        Label(r.formatted(date: .abbreviated, time: .shortened), systemImage: "bell")
+                            .font(.caption2)
+                            .foregroundStyle(r < Date() ? .red : fg.opacity(0.7))
+                    }
                 } else if !tiled {
                     Text(note.updated.formatted(.relative(presentation: .named))).font(.caption2).opacity(0.55)
                 }
             }
         }
-        .foregroundStyle(bg == nil ? Color.primary : fg)
+        .foregroundStyle(fg)
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background {
@@ -140,5 +144,54 @@ struct NoteCard: View {
         }
         flush()
         return result
+    }
+}
+
+struct NoteCardLabels: View {
+    let labels: [String]
+    let foreground: Color
+
+    var body: some View {
+        if let first = labels.first {
+            ViewThatFits(in: .horizontal) {
+                ForEach((1...min(3, labels.count)).reversed(), id: \.self) { count in
+                    HStack(spacing: 4) {
+                        ForEach(labels.prefix(count), id: \.self) { label in
+                            tag(label)
+                        }
+                        overflow(after: count)
+                    }
+                    .fixedSize(horizontal: true, vertical: true)
+                }
+                HStack(spacing: 4) {
+                    tag(first).layoutPriority(1)
+                    overflow(after: 1)
+                }
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Labels: \(labels.joined(separator: ", "))")
+        }
+    }
+
+    private func tag(_ label: String) -> some View {
+        Text(label)
+            .font(.caption2)
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .foregroundStyle(foreground.opacity(0.85))
+            .background(foreground.opacity(0.09), in: RoundedRectangle(cornerRadius: 4))
+            .help(label)
+    }
+
+    @ViewBuilder private func overflow(after count: Int) -> some View {
+        if labels.count > count {
+            Text("+\(labels.count - count)")
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(foreground.opacity(0.6))
+                .fixedSize()
+                .help(labels.dropFirst(count).joined(separator: ", "))
+        }
     }
 }

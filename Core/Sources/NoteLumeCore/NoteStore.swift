@@ -151,8 +151,8 @@ public actor NoteStore {
 
     @discardableResult
     public func create(body: String = "", labels: [String] = [], sticky: Bool = false,
-                       color: String? = nil, title: String? = nil, markdown: Bool = true) async throws -> LoadedNote {
-        let meta = NoteMetadata(title: title, labels: LabelNormalizer.normalize(labels), color: color, sticky: sticky, markdown: markdown)
+                       color: String? = nil, textColor: String? = nil, title: String? = nil, markdown: Bool = true) async throws -> LoadedNote {
+        let meta = NoteMetadata(title: title, labels: LabelNormalizer.normalize(labels), color: color, textColor: textColor, sticky: sticky, markdown: markdown)
         let loaded = try await repository.create(NoteDocument(metadata: meta, body: body))
         try index.upsert(loaded)
         emit(.notesChanged(updated: [meta.id], removed: [], external: false))

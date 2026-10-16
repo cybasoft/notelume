@@ -181,6 +181,50 @@ import Testing
                 in: "(x", selection: NSRange(location: 1, length: 0), typed: ")") == nil)
     }
 
+    @Test func typingThreeBackticksCompletesFencedBlock() throws {
+        var text = ""
+        var selection = NSRange(location: 0, length: 0)
+        for _ in 0..<3 {
+            if let edit = MarkdownEditing.completeCodeFence(in: text, selection: selection, typed: "`") {
+                (text, selection) = apply(edit, to: text)
+            } else if let next = MarkdownEditing.closingCharacterSelection(
+                in: text, selection: selection, typed: "`")
+            {
+                selection = next
+            } else {
+                let edit = try #require(MarkdownEditing.autoPair(in: text, selection: selection, typed: "`"))
+                (text, selection) = apply(edit, to: text)
+            }
+        }
+        #expect(text == "```\n\n```")
+        #expect(selection == NSRange(location: 4, length: 0))
+    }
+
+    @Test func fenceCompletionReplacesInlineCloserAndPreservesFollowingText() throws {
+        let text = "```\nNext paragraph"
+        let edit = try #require(MarkdownEditing.completeCodeFence(
+            in: text, selection: NSRange(location: 2, length: 0), typed: "`"))
+        #expect(apply(edit, to: text).0 == "```\n\n```\nNext paragraph")
+        #expect(edit.selection == NSRange(location: 4, length: 0))
+    }
+
+    @Test func fenceCompletionPreservesIndentAndWindowsNewlines() throws {
+        let text = "  ``\r\nFollowing"
+        let edit = try #require(MarkdownEditing.completeCodeFence(
+            in: text, selection: NSRange(location: 4, length: 0), typed: "`"))
+        #expect(apply(edit, to: text).0 == "  ```\r\n  \r\n  ```\r\nFollowing")
+        #expect(edit.selection == NSRange(location: 9, length: 0))
+    }
+
+    @Test func fenceCompletionLeavesInlineCodeAndExistingBlocksAlone() {
+        for text in ["inline ``", "    ``", "```swift\n``", "```swift\nvalue\n``"] {
+            #expect(MarkdownEditing.completeCodeFence(
+                in: text, selection: NSRange(location: text.utf16.count, length: 0), typed: "`") == nil)
+        }
+        #expect(MarkdownEditing.completeCodeFence(
+            in: "``", selection: NSRange(location: 0, length: 2), typed: "`") == nil)
+    }
+
     @Test func slashCommandFiltering() {
         #expect(MarkdownEditing.slashCommands(matching: "").count == 6)
         #expect(MarkdownEditing.slashCommands(matching: "code") == [.code])

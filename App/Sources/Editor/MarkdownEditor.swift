@@ -1481,6 +1481,12 @@ final class MarkdownTextView: NSTextView {
             needsDisplay = true
             return
         }
+        if let edit = MarkdownEditing.completeCodeFence(
+            in: string, selection: selection, typed: typed)
+        {
+            apply(edit)
+            return
+        }
         if let next = MarkdownEditing.closingCharacterSelection(
             in: string, selection: selection, typed: typed)
         {

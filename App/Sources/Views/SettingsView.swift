@@ -119,6 +119,26 @@ private struct WindowSettings: View {
                         get: { Color(nsColor: NSColor(hex: settings.defaultNoteColor) ?? .windowBackgroundColor) },
                         set: { settings.defaultNoteColor = NSColor($0).hexString }),
                     supportsOpacity: false)
+                HStack {
+                    ColorPicker(
+                        "Default text color",
+                        selection: Binding(
+                            get: {
+                                Color(nsColor: NoteAppearance.text(
+                                    textHex: settings.defaultTextColor,
+                                    backgroundHex: settings.defaultNoteColor))
+                            },
+                            set: { settings.defaultTextColor = NSColor($0).hexString }),
+                        supportsOpacity: false)
+                    Button {
+                        settings.defaultTextColor = nil
+                    } label: {
+                        Image(systemName: "arrow.uturn.backward")
+                    }
+                    .help("Use automatic text contrast")
+                    .accessibilityLabel("Use automatic text contrast")
+                    .disabled(settings.defaultTextColor == nil)
+                }
             }
             Picker("Collection layout", selection: $settings.layout) {
                 ForEach(CollectionLayout.allCases) { Text($0.title).tag($0) }
