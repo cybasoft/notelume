@@ -37,6 +37,7 @@ final class AppModel {
     var lastError: String?
 
     private(set) var sessions: [UUID: NoteEditSession] = [:]
+    private(set) var selectedNoteID: UUID?
     let folder = FolderAccess()
     let scheduler = UNScheduler()
     let spotlight = SpotlightIndexer()
@@ -73,6 +74,7 @@ final class AppModel {
         eventTask?.cancel()
         if let old = store { await old.stop() }
         sessions.removeAll()
+        selectedNoteID = nil
         do {
             let support = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
                 .appendingPathComponent("NoteLume", isDirectory: true)
@@ -184,7 +186,9 @@ final class AppModel {
     func session(for id: UUID) async throws -> NoteEditSession {
         if let s = sessions[id] { return s }
         guard let store else { throw NoteError.notFound(id) }
-        let session = NoteEditSession(loaded: try await store.load(id), store: store)
+        let loaded = try await store.load(id)
+        if let session = sessions[id] { return session }
+        let session = NoteEditSession(loaded: loaded, store: store)
         sessions[id] = session
         return session
     }
@@ -194,7 +198,47 @@ final class AppModel {
     }
 
     func openNote(_ id: UUID) {
-        windows?.show(id)
+        guard settings?.noteOpenMode == .library else {
+            windows?.show(id)
+            return
+        }
+        if !hits.contains(where: { $0.id == id }) || selection == .trash || selection == .conflicts {
+            searchText = ""
+            selection = .all
+        }
+        selectNote(id)
+        openLibrary?()
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    func selectNote(_ id: UUID?) {
+        guard selectedNoteID != id else { return }
+        let previous = selectedNoteID.flatMap { sessions[$0] }
+        selectedNoteID = id
+        Task {
+            await previous?.flush()
+            guard let id else { return }
+            do { _ = try await session(for: id) }
+            catch {
+                if selectedNoteID == id { selectedNoteID = nil }
+                lastError = error.localizedDescription
+            }
+        }
+    }
+
+    func setNoteOpenMode(_ mode: NoteOpenMode) {
+        guard let settings, settings.noteOpenMode != mode else { return }
+        settings.noteOpenMode = mode
+        if mode == .library {
+            windows?.closeAll()
+            if selectedNoteID == nil { selectNote(hits.first?.id) }
+            openLibrary?()
+            NSApp.activate(ignoringOtherApps: true)
+        } else {
+            Task { await flushAll() }
+            if let selectedNoteID { windows?.show(selectedNoteID) }
+            windows?.restoreStickyWindows()
+        }
     }
 
     /// Creates the file immediately (valid frontmatter, UUID name) and opens it for typing.
@@ -252,6 +296,7 @@ final class AppModel {
         Task {
             do {
                 windows?.close(id)
+                if selectedNoteID == id { selectedNoteID = nil }
                 sessions[id] = nil
                 try await store.trash(id)
             } catch { lastError = error.localizedDescription }

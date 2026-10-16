@@ -101,6 +101,12 @@ private struct WindowSettings: View {
     @Bindable var settings: DeviceSettings
     var body: some View {
         Form {
+            Picker("Open notes in", selection: Binding(
+                get: { settings.noteOpenMode },
+                set: { model.setNoteOpenMode($0) })) {
+                ForEach(NoteOpenMode.allCases) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.segmented)
             Section {
                 LabeledContent("Default note color") {
                     HStack(spacing: 8) {
@@ -163,21 +169,25 @@ private struct WindowSettings: View {
                     .disabled(settings.defaultTextColor == nil)
                 }
             }
-            Picker("Collection layout", selection: $settings.layout) {
-                ForEach(CollectionLayout.allCases) { Text($0.title).tag($0) }
+            if settings.noteOpenMode == .windows {
+                Picker("Collection layout", selection: $settings.layout) {
+                    ForEach(CollectionLayout.allCases) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                if settings.layout == .tiled {
+                    LabeledContent("Tile size") { Slider(value: $settings.tileSize, in: 140...340) }
+                }
             }
-            .pickerStyle(.segmented)
-            if settings.layout == .tiled {
-                LabeledContent("Tile size") { Slider(value: $settings.tileSize, in: 140...340) }
-            }
-            Toggle("Show content previews on cards", isOn: $settings.showPreviews)
-            Divider()
-            Toggle("Sticky notes stay on top of other windows", isOn: $settings.stickyAlwaysOnTop)
-            Toggle("Fade note windows when unfocused", isOn: Binding(
-                get: { settings.fadeWhenUnfocused },
-                set: { settings.fadeWhenUnfocused = $0; model.windows?.applyFadeSetting() }))
-            Picker("Open note windows", selection: $settings.stickyPlacement) {
-                ForEach(StickyPlacement.allCases) { Text($0.title).tag($0) }
+            Toggle("Show content previews", isOn: $settings.showPreviews)
+            if settings.noteOpenMode == .windows {
+                Divider()
+                Toggle("Sticky notes stay on top of other windows", isOn: $settings.stickyAlwaysOnTop)
+                Toggle("Fade note windows when unfocused", isOn: Binding(
+                    get: { settings.fadeWhenUnfocused },
+                    set: { settings.fadeWhenUnfocused = $0; model.windows?.applyFadeSetting() }))
+                Picker("Open note windows", selection: $settings.stickyPlacement) {
+                    ForEach(StickyPlacement.allCases) { Text($0.title).tag($0) }
+                }
             }
             Section("Menubar") {
                 RecentCountInput(settings: settings)

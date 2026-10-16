@@ -15,6 +15,12 @@ enum CollectionLayout: String, CaseIterable, Identifiable {
     var title: String { self == .stacked ? "Stacked" : "Tiled" }
 }
 
+enum NoteOpenMode: String, CaseIterable, Identifiable {
+    case windows, library
+    var id: String { rawValue }
+    var title: String { self == .windows ? "Separate windows" : "App window" }
+}
+
 @MainActor
 enum CodeFont {
     static let families: [String] = NSFontManager.shared.availableFontFamilies.filter { family in
@@ -79,6 +85,7 @@ final class DeviceSettings {
     @ObservationIgnored private let index: NoteIndex
 
     var editorMode: EditorMode { didSet { save("editorMode", editorMode.rawValue) } }
+    var noteOpenMode: NoteOpenMode { didSet { save("noteOpenMode", noteOpenMode.rawValue) } }
     var defaultNoteColor: String? { didSet { save("defaultNoteColor", defaultNoteColor ?? "") } }
     var defaultTextColor: String? { didSet { save("defaultTextColor", defaultTextColor ?? "") } }
     var codeFontFamily: String { didSet { save("codeFontFamily", codeFontFamily) } }
@@ -100,6 +107,7 @@ final class DeviceSettings {
         self.index = index
         func get(_ k: String) -> String? { (try? index.setting(k)) ?? nil }
         editorMode = EditorMode(rawValue: get("editorMode") ?? "") ?? .visual
+        noteOpenMode = NoteOpenMode(rawValue: get("noteOpenMode") ?? "") ?? .windows
         defaultNoteColor = get("defaultNoteColor").flatMap { $0.isEmpty ? nil : $0 }
         defaultTextColor = get("defaultTextColor").flatMap { $0.isEmpty ? nil : $0 }
         codeFontFamily = get("codeFontFamily") ?? ""

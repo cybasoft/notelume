@@ -32,6 +32,7 @@ final class NoteWindowManager: NSObject, NSWindowDelegate {
     // MARK: Showing
 
     func show(_ id: UUID) {
+        guard model.settings?.noteOpenMode != .library else { return }
         if let w = windows[id] {
             if w.isMiniaturized { w.deminiaturize(nil) }
             bringToFront(w)
@@ -51,7 +52,7 @@ final class NoteWindowManager: NSObject, NSWindowDelegate {
 
     /// Re-opens sticky notes that were open on this Mac when the app last quit.
     func restoreStickyWindows() {
-        guard let store = model.store else { return }
+        guard model.settings?.noteOpenMode != .library, let store = model.store else { return }
         for id in (try? store.index.openWindowNoteIDs()) ?? [] where model.summary(id)?.sticky == true {
             show(id)
         }
@@ -79,7 +80,8 @@ final class NoteWindowManager: NSObject, NSWindowDelegate {
 
     private func build(_ session: NoteEditSession) {
         let id = session.noteID
-        guard windows[id] == nil, let store = model.store, let settings = model.settings else { return }
+          guard windows[id] == nil, let store = model.store, let settings = model.settings,
+              settings.noteOpenMode != .library else { return }
         let sticky = session.document.metadata.sticky
         let saved = (try? store.index.windowGeometry(for: id)) ?? nil
         let onTop = saved?.alwaysOnTop ?? (sticky && settings.stickyAlwaysOnTop)

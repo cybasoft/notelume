@@ -13,6 +13,14 @@ when a release is available, then drag NoteLume into Applications.
 
 Core has no AppKit dependency apart from the FSEvents watcher (`#if os(macOS)`), so an iOS target can reuse it.
 
+## Editing Notes
+
+In **Settings > Notes > Open notes in**, choose **App window** to edit notes
+beside a selectable sidebar list. Sticky notes appear first in that list.
+The same editor, labels, colors, reminders, version history, and recovery
+controls are available in both modes. Choose **Separate windows** to return
+to individual note windows. This preference is saved only on this Mac.
+
 ## Generating debug app
 
 ```bash

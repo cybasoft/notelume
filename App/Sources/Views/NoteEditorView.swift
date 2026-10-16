@@ -6,8 +6,8 @@ import UniformTypeIdentifiers
 struct NoteEditorView: View {
     @Bindable var session: NoteEditSession
     let model: AppModel
-    let windowState: NoteWindowState
-    let setAlwaysOnTop: (Bool) -> Void
+    var windowState: NoteWindowState? = nil
+    var setAlwaysOnTop: (Bool) -> Void = { _ in }
 
     @State private var showLabels = false
     @State private var showAppearance = false
@@ -116,7 +116,11 @@ struct NoteEditorView: View {
                 .opacity(opacity)
                 .ignoresSafeArea()
         }
-        .background(WindowTitle(title: session.document.displayTitle).allowsHitTesting(false))
+        .background {
+            if windowState != nil {
+                WindowTitle(title: session.document.displayTitle).allowsHitTesting(false)
+            }
+        }
         .onChange(of: titleFocused) { _, focused in
             if focused { editingTitle = true } else if meta.title == nil { editingTitle = false }
         }
@@ -266,7 +270,7 @@ struct NoteEditorView: View {
                         session.updateMetadata { $0.sticky = !pinned }
                     }
                 }
-                if meta.sticky || windowState.alwaysOnTop {
+                if let windowState, meta.sticky || windowState.alwaysOnTop {
                     toolbarButton(
                         windowState.alwaysOnTop ? "macwindow.on.rectangle" : "macwindow",
                         active: windowState.alwaysOnTop,

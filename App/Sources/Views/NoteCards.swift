@@ -47,17 +47,22 @@ struct NoteCard: View {
     let hit: SearchHit
     let tiled: Bool
     let showPreview: Bool
+    var inSidebar = false
     @State private var hovering = false
 
     private var note: NoteSummary { hit.note }
 
     var body: some View {
         let bg = NSColor(hex: note.color)
-        let fg = Color(NoteAppearance.text(textHex: note.textColor, backgroundHex: note.color))
+        let fg = inSidebar ? Color.primary : Color(NoteAppearance.text(textHex: note.textColor, backgroundHex: note.color))
         let alpha = note.opacity ?? 1
 
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
+                if inSidebar, let bg {
+                    Circle().fill(Color(nsColor: bg)).frame(width: 7, height: 7)
+                        .accessibilityLabel("Note color")
+                }
                 if note.sticky { Image(systemName: "pin.fill").font(.caption).foregroundStyle(fg.opacity(0.7)) }
                 Text(note.title).font(.headline).lineLimit(tiled ? 2 : 1)
                 Spacer(minLength: 4)
@@ -94,11 +99,17 @@ struct NoteCard: View {
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background {
-            RoundedRectangle(cornerRadius: 10)
-                .fill(bg.map { Color(nsColor: $0).opacity(alpha) } ?? Color(nsColor: .controlBackgroundColor))
-                .shadow(color: .black.opacity(hovering ? 0.18 : 0.08), radius: hovering ? 5 : 2, y: 1)
+            if !inSidebar {
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(bg.map { Color(nsColor: $0).opacity(alpha) } ?? Color(nsColor: .controlBackgroundColor))
+                    .shadow(color: .black.opacity(hovering ? 0.18 : 0.08), radius: hovering ? 5 : 2, y: 1)
+            }
         }
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.separator.opacity(0.6)))
+        .overlay {
+            if !inSidebar {
+                RoundedRectangle(cornerRadius: 10).strokeBorder(.separator.opacity(0.6))
+            }
+        }
         .contentShape(RoundedRectangle(cornerRadius: 10))
         .onHover { hovering = $0 }
         .onTapGesture { model.openNote(note.id) }

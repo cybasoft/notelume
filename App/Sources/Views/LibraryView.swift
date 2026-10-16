@@ -7,12 +7,32 @@ struct LibraryView: View {
     @State private var renameText = ""
     @State private var deleting: String?
 
+    private var editsInLibrary: Bool { model.settings?.noteOpenMode == .library }
+
+    private var sidebarHits: [SearchHit] {
+        Self.stickyFirst(model.hits)
+    }
+
+    static func stickyFirst(_ hits: [SearchHit]) -> [SearchHit] {
+        hits.filter { $0.note.sticky } + hits.filter { !$0.note.sticky }
+    }
+
+    private var notesNeedingAttention: [NoteEditSession] {
+        model.sessions.values.filter { session in
+            switch session.state {
+            case .conflict, .deletedOnDisk, .failed:
+                !model.hits.contains { $0.id == session.noteID }
+            default: false
+            }
+        }.sorted { $0.document.displayTitle.localizedStandardCompare($1.document.displayTitle) == .orderedAscending }
+    }
+
     var body: some View {
         // A plain two-pane layout instead of NavigationSplitView: its restored/ideal sizing produced a
         // layout far taller than the window, leaving the sidebar and list scrolled out of view.
         HStack(spacing: 0) {
             sidebar
-                .frame(width: 220)
+                .frame(width: editsInLibrary ? 180 : 220)
             Divider()
             VStack(spacing: 0) {
                 banners
@@ -24,6 +44,11 @@ struct LibraryView: View {
         .toolbar { toolbar }
         .searchable(text: $model.searchText, placement: .toolbar, prompt: "Search notes")
         .modifier(SearchFocus(tick: model.searchFocusTick))
+        .onChange(of: model.hits.map(\.id), initial: true) { _, _ in
+            if editsInLibrary, model.selectedNoteID == nil { model.selectNote(sidebarHits.first?.id) }
+        }
+        .onChange(of: model.selection) { _, _ in selectVisibleNote() }
+        .onChange(of: model.searchText) { _, _ in selectVisibleNote() }
         .alert("Rename Label", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
             TextField("Label", text: $renameText)
             Button("Rename") { if let old = renaming { model.renameLabel(old, to: renameText) }; renaming = nil }
@@ -105,11 +130,59 @@ struct LibraryView: View {
         case .trash: TrashView(model: model)
         case .conflicts: ConflictsView(model: model)
         default:
-            if model.hits.isEmpty {
+            if editsInLibrary {
+                HSplitView {
+                    List(selection: Binding(
+                        get: { model.selectedNoteID },
+                        set: { model.selectNote($0) })) {
+                        if !notesNeedingAttention.isEmpty {
+                            Section("Needs Attention") {
+                                ForEach(notesNeedingAttention, id: \.noteID) { session in
+                                    Label(session.document.displayTitle, systemImage: "exclamationmark.triangle")
+                                        .tag(session.noteID)
+                                }
+                            }
+                        }
+                        ForEach(sidebarHits) { hit in
+                            NoteCard(model: model, hit: hit, tiled: false,
+                                     showPreview: model.settings?.showPreviews ?? true,
+                                     inSidebar: true)
+                                .tag(hit.id)
+                                .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+                        }
+                    }
+                    .listStyle(.sidebar)
+                    .frame(minWidth: 220, idealWidth: 260, maxWidth: 340)
+                    .frame(maxHeight: .infinity)
+                    inlineEditor
+                        .frame(minWidth: 300, maxWidth: .infinity, maxHeight: .infinity)
+                }
+            } else if model.hits.isEmpty {
                 emptyState
             } else {
                 NoteCollectionView(model: model, hits: model.hits)
             }
+        }
+    }
+
+    @ViewBuilder private var inlineEditor: some View {
+        if let id = model.selectedNoteID, let session = model.sessions[id] {
+            NoteEditorView(session: session, model: model)
+                .id(id)
+        } else if model.selectedNoteID != nil {
+            ProgressView("Opening note...")
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if model.hits.isEmpty {
+            emptyState
+        } else {
+            ContentUnavailableView("Select a Note", systemImage: "note.text")
+        }
+    }
+
+    private func selectVisibleNote() {
+        guard editsInLibrary, model.selection != .trash, model.selection != .conflicts else { return }
+        if !sidebarHits.contains(where: { $0.id == model.selectedNoteID }) {
+            model.selectNote(sidebarHits.first?.id)
         }
     }
 
@@ -171,12 +244,14 @@ struct LibraryView: View {
     @ToolbarContentBuilder private var toolbar: some ToolbarContent {
         if let settings = model.settings {
             ToolbarItemGroup {
-                Picker("Layout", selection: Binding(get: { settings.layout }, set: { settings.layout = $0 })) {
-                    Label("Stacked", systemImage: "list.bullet.rectangle").tag(CollectionLayout.stacked)
-                    Label("Tiled", systemImage: "square.grid.2x2").tag(CollectionLayout.tiled)
+                if !editsInLibrary {
+                    Picker("Layout", selection: Binding(get: { settings.layout }, set: { settings.layout = $0 })) {
+                        Label("Stacked", systemImage: "list.bullet.rectangle").tag(CollectionLayout.stacked)
+                        Label("Tiled", systemImage: "square.grid.2x2").tag(CollectionLayout.tiled)
+                    }
+                    .pickerStyle(.segmented)
+                    .help("Stacked cards or a tiled grid")
                 }
-                .pickerStyle(.segmented)
-                .help("Stacked cards or a tiled grid")
 
                 Button {
                     settings.editorMode = settings.editorMode == .visual ? .source : .visual
