@@ -77,6 +77,7 @@ import Testing
         let spans = MarkdownAnalyzer.spans(in: s)
         #expect(find(spans) { $0 == .tableHeader }.count == 1)
         #expect(find(spans) { $0 == .tableRow }.count == 2)
+        #expect(find(spans) { $0 == .tableDivider }.count == 1)
     }
 
     @Test func offsetsAreUTF16CorrectWithEmojiAndAccents() {

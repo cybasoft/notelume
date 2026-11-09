@@ -23,6 +23,7 @@ public enum MarkdownEditing {
         case checklist
         case heading
         case divider
+        case table
         case today
         case image
 
@@ -32,6 +33,7 @@ public enum MarkdownEditing {
             case .checklist: "Checklist"
             case .heading: "Heading"
             case .divider: "Divider"
+            case .table: "Table"
             case .today: "Today's date"
             case .image: "Image…"
             }

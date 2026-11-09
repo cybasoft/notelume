@@ -24,6 +24,7 @@ public struct MarkdownSpan: Equatable, Sendable {
         case checkbox(checked: Bool)
         case tableHeader
         case tableRow
+        case tableDivider
         case thematicBreak
     }
 
@@ -133,6 +134,15 @@ public enum MarkdownAnalyzer {
             let u = c.utf16.first!
             while start + n < limit, char(at: start + n) == u { n += 1 }
             return n
+        }
+
+        private func looksLikeTableDivider(_ line: NSRange) -> Bool {
+            let lineText = ns.substring(with: line)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !lineText.isEmpty else { return false }
+            // Allow common divider forms like |---|:---:|---| or ---|---.
+            return lineText.allSatisfy { "|-: ".contains($0) } && lineText.contains("-")
+                && lineText.contains("|")
         }
 
         mutating func visitHeading(_ heading: Heading) {
@@ -270,8 +280,22 @@ public enum MarkdownAnalyzer {
         }
 
         mutating func visitTable(_ table: Table) {
-            if let r = nsRange(table.head) { spans.append(.init(kind: .tableHeader, range: r)) }
-            for row in table.body.rows { if let r = nsRange(row) { spans.append(.init(kind: .tableRow, range: r)) } }
+            if let header = nsRange(table.head) {
+                spans.append(.init(kind: .tableHeader, range: header))
+
+                let dividerStart = NSMaxRange(ns.lineRange(for: header))
+                if dividerStart < ns.length {
+                    let dividerLine = ns.lineRange(for: NSRange(location: dividerStart, length: 0))
+                    if looksLikeTableDivider(dividerLine) {
+                        spans.append(.init(kind: .tableDivider, range: dividerLine))
+                    }
+                }
+            }
+            for row in table.body.rows {
+                if let r = nsRange(row) {
+                    spans.append(.init(kind: .tableRow, range: r))
+                }
+            }
             descendInto(table)
         }
 

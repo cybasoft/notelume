@@ -117,6 +117,8 @@ struct MarkdownEditor: NSViewRepresentable {
         private var cachedCodeTokens: [Int: [CodeToken]] = [:]
         private var appliedSelectionSpans: [Int] = []
         private var hiddenRanges: [NSRange] = []
+        private var renderedTableSpans = Set<Int>()
+        private(set) var renderedTables: [RenderedTable] = []
         private var rawCodeBlocks = Set<Int>()
         private var codeLineNumbers = Set<Int>()
         private var isPeekingRaw = false
@@ -276,7 +278,10 @@ struct MarkdownEditor: NSViewRepresentable {
                 let span = cachedSpans[index]
                 guard NSMaxRange(span.range) <= text.length else { return false }
                 if span.syntax.isEmpty {
-                    guard case .image = span.kind else { return false }
+                    switch span.kind {
+                    case .image, .tableHeader, .tableRow: break
+                    default: return false
+                    }
                 }
                 return MarkdownEditing.selection(selection, touches: text.lineRange(for: span.range))
             }
@@ -496,9 +501,24 @@ struct MarkdownEditor: NSViewRepresentable {
             let sel = tv.selectedRange()
             var newHidden: [NSRange] = []
 
+            let tables = tableGroups()
+            renderedTableSpans = []
+            if visual {
+                for group in tables {
+                    let rows = [group.header] + group.rows
+                    let end = max(
+                        NSMaxRange(rows.last!.range), NSMaxRange(group.divider?.range ?? rows[0].range))
+                    guard end <= ns.length else { continue }
+                    let block = NSRange(location: group.header.range.location, length: end - group.header.range.location)
+                    if MarkdownEditing.selection(sel, touches: ns.lineRange(for: block)) { continue }
+                    for row in rows { renderedTableSpans.insert(row.range.location) }
+                }
+            }
+
             storage.beginEditing()
             storage.setAttributes(base, range: full)
             for span in cachedSpans { style(span, in: storage, base: base) }
+            layoutTables(tables, in: storage, hidden: &newHidden)
 
             // Syntax markers retain their metrics so selection changes cannot reflow the note.
             for span in cachedSpans {
@@ -698,18 +718,162 @@ struct MarkdownEditor: NSViewRepresentable {
                         .qnForegroundRole: ForegroundRole.fixed,
                         .font: NSFont.monospacedSystemFont(ofSize: baseSize, weight: .semibold),
                     ], range: r)
-            case .tableHeader:
-                storage.addAttribute(
-                    .font,
-                    value: NSFont.monospacedSystemFont(ofSize: baseSize * 0.93, weight: .semibold),
-                    range: r)
-            case .tableRow:
-                storage.addAttribute(
-                    .font,
-                    value: NSFont.monospacedSystemFont(ofSize: baseSize * 0.93, weight: .regular),
-                    range: r)
+            case .tableHeader, .tableRow:
+                let weight: NSFont.Weight = span.kind == .tableHeader ? .semibold : .regular
+                if renderedTableSpans.contains(r.location) {
+                    let paragraph = NSMutableParagraphStyle()
+                    paragraph.setParagraphStyle((base[.paragraphStyle] as? NSParagraphStyle) ?? .default)
+                    paragraph.lineBreakMode = .byClipping
+                    paragraph.paragraphSpacingBefore = 5
+                    paragraph.paragraphSpacing = 5
+                    storage.addAttributes(
+                        [
+                            .font: NSFont.systemFont(ofSize: baseSize, weight: weight),
+                            .paragraphStyle: paragraph,
+                        ], range: (storage.string as NSString).lineRange(for: r))
+                } else {
+                    storage.addAttribute(
+                        .font,
+                        value: NSFont.monospacedSystemFont(ofSize: baseSize * 0.93, weight: weight),
+                        range: r)
+                }
+            case .tableDivider:
+                setColor(.tertiaryLabelColor, in: storage, range: r)
             case .thematicBreak:
                 setColor(.tertiaryLabelColor, in: storage, range: r)
+            }
+        }
+
+        struct RenderedTable {
+            let rows: [NSRange]
+            let columnWidths: [CGFloat]
+        }
+
+        private struct TableGroup {
+            let header: MarkdownSpan
+            var rows: [MarkdownSpan] = []
+            var divider: MarkdownSpan?
+        }
+
+        private struct TableCell {
+            let content: NSRange
+            let padding: [NSRange]
+            let pipe: Int?
+        }
+
+        private func tableGroups() -> [TableGroup] {
+            var groups: [TableGroup] = []
+            for span in cachedSpans {
+                switch span.kind {
+                case .tableHeader: groups.append(TableGroup(header: span))
+                case .tableRow: if !groups.isEmpty { groups[groups.count - 1].rows.append(span) }
+                case .tableDivider: if !groups.isEmpty { groups[groups.count - 1].divider = span }
+                default: break
+                }
+            }
+            return groups
+        }
+
+        /// Splits a row on unescaped pipes; returns the cells and every pipe offset.
+        private func parseTableRow(_ row: NSRange, in ns: NSString) -> (cells: [TableCell], pipes: [Int]) {
+            let end = NSMaxRange(row)
+            var pipes: [Int] = []
+            var i = row.location
+            while i < end {
+                let c = ns.character(at: i)
+                if c == 0x5C { i += 2; continue }
+                if c == 0x7C { pipes.append(i) }
+                i += 1
+            }
+            var pieces: [(range: NSRange, pipe: Int?)] = []
+            var start = row.location
+            var pipe: Int?
+            for p in pipes {
+                pieces.append((NSRange(location: start, length: p - start), pipe))
+                start = p + 1
+                pipe = p
+            }
+            pieces.append((NSRange(location: start, length: max(0, end - start)), pipe))
+            if pipes.first == row.location { pieces.removeFirst() }
+            if pipes.last == end - 1, !pieces.isEmpty { pieces.removeLast() }
+            let cells = pieces.map { piece -> TableCell in
+                var lo = piece.range.location
+                var hi = NSMaxRange(piece.range)
+                func blank(_ i: Int) -> Bool { [0x20, 0x09].contains(ns.character(at: i)) }
+                while lo < hi, blank(lo) { lo += 1 }
+                while hi > lo, blank(hi - 1) { hi -= 1 }
+                return TableCell(
+                    content: NSRange(location: lo, length: hi - lo),
+                    padding: [
+                        NSRange(location: piece.range.location, length: lo - piece.range.location),
+                        NSRange(location: hi, length: NSMaxRange(piece.range) - hi),
+                    ], pipe: piece.pipe)
+            }
+            return (cells, pipes)
+        }
+
+        /// Hides pipes and padding, then pads each cell with kerning so columns line up.
+        private func layoutTables(
+            _ groups: [TableGroup], in storage: NSTextStorage, hidden: inout [NSRange]
+        ) {
+            renderedTables = []
+            let ns = storage.string as NSString
+            let pad: CGFloat = 10
+            for group in groups where renderedTableSpans.contains(group.header.range.location) {
+                let rowSpans = [group.header] + group.rows
+                guard rowSpans.allSatisfy({ NSMaxRange($0.range) <= ns.length }) else { continue }
+                let parsed = rowSpans.map { parseTableRow($0.range, in: ns) }
+                let columnCount = parsed.map { $0.cells.count }.max() ?? 0
+                guard columnCount > 0 else { continue }
+                var widest = [CGFloat](repeating: 0, count: columnCount)
+                let textWidths = parsed.map { row in
+                    row.cells.enumerated().map { index, cell -> CGFloat in
+                        let width =
+                            cell.content.length > 0
+                            ? storage.attributedSubstring(from: cell.content).size().width : 0
+                        widest[index] = max(widest[index], width)
+                        return width
+                    }
+                }
+                let columnWidths = widest.map { max($0 + 2 * pad, 56) }
+
+                for (r, row) in parsed.enumerated() {
+                    for pipe in row.pipes {
+                        setColor(.clear, in: storage, range: NSRange(location: pipe, length: 1))
+                    }
+                    for (i, cell) in row.cells.enumerated() {
+                        for gap in cell.padding where gap.length > 0 {
+                            storage.addAttribute(.qnHidden, value: true, range: gap)
+                            hidden.append(gap)
+                        }
+                        guard let pipe = cell.pipe else { continue }
+                        let font =
+                            storage.attribute(.font, at: pipe, effectiveRange: nil) as? NSFont
+                            ?? .systemFont(ofSize: 14)
+                        let pipeWidth = ("|" as NSString).size(withAttributes: [.font: font]).width
+                        let advance = i == 0 ? pad : columnWidths[i - 1] - textWidths[r][i - 1]
+                        storage.addAttribute(
+                            .kern, value: advance - pipeWidth,
+                            range: NSRange(location: pipe, length: 1))
+                    }
+                    if let first = row.cells.first, first.pipe == nil {
+                        let line = ns.lineRange(for: rowSpans[r].range)
+                        let paragraph = NSMutableParagraphStyle()
+                        paragraph.setParagraphStyle(
+                            storage.attribute(.paragraphStyle, at: line.location, effectiveRange: nil)
+                                as? NSParagraphStyle ?? .default)
+                        paragraph.firstLineHeadIndent = pad
+                        storage.addAttribute(.paragraphStyle, value: paragraph, range: line)
+                    }
+                }
+                if let divider = group.divider, divider.range.length > 0,
+                    NSMaxRange(divider.range) <= ns.length
+                {
+                    storage.addAttribute(.qnHidden, value: true, range: divider.range)
+                    hidden.append(divider.range)
+                }
+                renderedTables.append(
+                    RenderedTable(rows: rowSpans.map(\.range), columnWidths: columnWidths))
             }
         }
 
@@ -817,6 +981,7 @@ final class MarkdownTextView: NSTextView {
         updateCheckboxButtons()
         let cards = codeCards()
         drawCodeBackgrounds(cards, in: dirtyRect)
+        drawTables(in: dirtyRect)
         super.draw(dirtyRect)
         drawQuoteBars(in: dirtyRect)
         drawCodeControls(cards)
@@ -973,6 +1138,64 @@ final class MarkdownTextView: NSTextView {
             (focused ? NSColor.controlAccentColor.withAlphaComponent(0.55) : border).setStroke()
             path.lineWidth = focused ? 1.5 : 1
             path.stroke()
+        }
+    }
+
+    /// Header fill, striped rows, column rules and a rounded border behind aligned table text.
+    private func drawTables(in dirtyRect: NSRect) {
+        guard let lm = layoutManager, let tc = textContainer, let coord = coordinator,
+            coord.isVisual
+        else { return }
+        let length = (string as NSString).length
+        let origin = textContainerOrigin
+        let isDark = coord.appliedTextColor.luminance > 0.5
+        let base: NSColor = isDark ? .white : .black
+        for table in coord.renderedTables {
+            var used: [(min: CGFloat, max: CGFloat)] = []
+            for range in table.rows where NSMaxRange(range) <= length {
+                let glyphs = lm.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+                var union: NSRect?
+                lm.enumerateLineFragments(forGlyphRange: glyphs) { _, usedRect, _, _, _ in
+                    union = union.map { $0.union(usedRect) } ?? usedRect
+                }
+                if let union { used.append((union.minY + origin.y, union.maxY + origin.y)) }
+            }
+            guard used.count == table.rows.count, used.count > 1 else { continue }
+            let gap = max(used[1].min - used[0].max, 8)
+            var edges = [used[0].min - gap / 2]
+            for i in 1..<used.count { edges.append((used[i - 1].max + used[i].min) / 2) }
+            edges.append(used[used.count - 1].max + gap / 2)
+
+            let width = table.columnWidths.reduce(0, +)
+            let x0 = origin.x + tc.lineFragmentPadding
+            let rect = NSRect(x: x0, y: edges[0], width: width, height: edges[edges.count - 1] - edges[0])
+            guard rect.insetBy(dx: -2, dy: -2).intersects(dirtyRect) else { continue }
+
+            let outline = NSBezierPath(roundedRect: rect, xRadius: 6, yRadius: 6)
+            NSGraphicsContext.saveGraphicsState()
+            outline.addClip()
+            base.withAlphaComponent(0.09).setFill()
+            NSRect(x: x0, y: edges[0], width: width, height: edges[1] - edges[0]).fill()
+            base.withAlphaComponent(0.04).setFill()
+            for row in stride(from: 2, to: used.count, by: 2) {
+                NSRect(x: x0, y: edges[row], width: width, height: edges[row + 1] - edges[row]).fill()
+            }
+            let rules = NSBezierPath()
+            var x = x0
+            for column in table.columnWidths.dropLast() {
+                x += column
+                rules.move(to: NSPoint(x: x, y: rect.minY))
+                rules.line(to: NSPoint(x: x, y: rect.maxY))
+            }
+            rules.move(to: NSPoint(x: x0, y: edges[1]))
+            rules.line(to: NSPoint(x: rect.maxX, y: edges[1]))
+            rules.lineWidth = 1
+            base.withAlphaComponent(0.14).setStroke()
+            rules.stroke()
+            NSGraphicsContext.restoreGraphicsState()
+            outline.lineWidth = 1
+            base.withAlphaComponent(0.2).setStroke()
+            outline.stroke()
         }
     }
 
@@ -1243,6 +1466,9 @@ final class MarkdownTextView: NSTextView {
             case .divider:
                 replacement = "---\n\n"
                 caretOffset = (replacement as NSString).length
+            case .table:
+                replacement = "| Header 1 | Header 2 | Header 3 |\n|---|---|---|\n| Cell | Cell | Cell |\n| Cell | Cell | Cell |\n\n"
+                caretOffset = ("| Header 1" as NSString).length
             case .today:
                 replacement = Date.now.formatted(date: .abbreviated, time: .omitted)
                 caretOffset = (replacement as NSString).length

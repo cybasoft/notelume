@@ -264,8 +264,9 @@ import Testing
     }
 
     @Test func slashCommandFiltering() {
-        #expect(MarkdownEditing.slashCommands(matching: "").count == 6)
+        #expect(MarkdownEditing.slashCommands(matching: "").count == 7)
         #expect(MarkdownEditing.slashCommands(matching: "code") == [.code])
+        #expect(MarkdownEditing.slashCommands(matching: "table") == [.table])
         #expect(MarkdownEditing.slashCommands(matching: "image") == [.image])
         #expect(MarkdownEditing.slashCommands(matching: "TOD") == [.today])
         #expect(MarkdownEditing.slashCommands(matching: "missing").isEmpty)
