@@ -1,0 +1,4 @@
+// Central app configuration. scripts/release.sh updates MARKETING_VERSION.
+MARKETING_VERSION = 1.0.0
+CURRENT_PROJECT_VERSION = 1
+APP_GITHUB_URL = https:/$()/github.com/cybasoft/notelume

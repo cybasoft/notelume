@@ -16,7 +16,9 @@ struct SettingsView: View {
                 DataSettings(model: model).tabItem { Label("Data", systemImage: "externaldrive") }
             }
             .frame(width: 520, height: 380)
-            .padding(20)
+            .padding(.horizontal, 20)
+            .padding(.top, 20)
+            AboutFooter().padding(.vertical, 10)
         } else {
             VStack(spacing: 12) {
                 Text("Choose a notes folder to configure NoteLume.")
@@ -326,5 +328,29 @@ private struct DataSettings: View {
             }
         }
         .formStyle(.grouped)
+    }
+}
+
+
+private struct AboutFooter: View {
+    private var version: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
+    }
+    private var githubURL: URL? {
+        (Bundle.main.object(forInfoDictionaryKey: "AppGitHubURL") as? String).flatMap(URL.init(string:))
+    }
+
+    var body: some View {
+        HStack {
+            if let githubURL {
+                Link(destination: githubURL) {
+                    Label("GitHub", systemImage: "chevron.left.forwardslash.chevron.right")
+                }
+            }
+            Spacer()
+            Text("Version \(version)").foregroundStyle(.secondary)
+        }
+        .font(.callout)
+        .padding(.horizontal, 24)
     }
 }

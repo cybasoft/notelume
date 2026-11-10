@@ -15,7 +15,6 @@ OUT="build/release/$TAG"
 APP="$OUT/NoteLume.app"
 ZIP="$OUT/NoteLume-$VERSION.zip"
 DMG="$OUT/NoteLume-$VERSION.dmg"
-SOURCE_COMMIT="$(git rev-parse HEAD)"
 
 notarize() {
   local artifact="$1"
@@ -56,6 +55,15 @@ if [[ "${2:-}" == --publish ]]; then
   fi
 fi
 
+if [[ "${2:-}" == --publish ]] || ! grep -qx "MARKETING_VERSION = $VERSION" App/Config.xcconfig; then
+  sed -i '' "s/^MARKETING_VERSION = .*/MARKETING_VERSION = $VERSION/" App/Config.xcconfig
+  if [[ -n "$(git status --porcelain App/Config.xcconfig)" ]]; then
+    git add App/Config.xcconfig
+    git commit -m "Release $VERSION" -- App/Config.xcconfig
+  fi
+fi
+SOURCE_COMMIT="$(git rev-parse HEAD)"
+
 swift test --package-path Core
 TEAM_ID="$TEAM_ID" SIGNING_IDENTITY="$SIGNING_IDENTITY" bash scripts/build.sh Release "$VERSION"
 mkdir -p "$OUT"
@@ -73,7 +81,12 @@ ditto -c -k --keepParent "$APP" "$ZIP"
 mkdir -p "$OUT/dmg"
 ditto "$APP" "$OUT/dmg/NoteLume.app"
 ln -s /Applications "$OUT/dmg/Applications"
-hdiutil create -volname "NoteLume $VERSION" -srcfolder "$OUT/dmg" -format UDZO "$DMG"
+if diskutil image create from --help >/dev/null 2>&1; then
+  diskutil image create from --format UDZO --volumeName "NoteLume $VERSION" "$OUT/dmg" "$DMG"
+else
+  # hdiutil create is deprecated but diskutil image is absent before macOS 15.
+  hdiutil create -volname "NoteLume $VERSION" -srcfolder "$OUT/dmg" -format UDZO "$DMG"
+fi
 codesign --sign "$SIGNING_IDENTITY" --timestamp "$DMG"
 notarize "$DMG" "$OUT/dmg-notarization.json"
 xcrun stapler staple "$DMG"

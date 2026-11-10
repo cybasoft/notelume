@@ -12,8 +12,9 @@ settings:
     CODE_SIGN_IDENTITY: "-"
     CODE_SIGN_STYLE: Manual
     ENABLE_HARDENED_RUNTIME: YES
-    MARKETING_VERSION: "1.0.0"
-    CURRENT_PROJECT_VERSION: "1"
+configFiles:
+  Debug: Config.xcconfig
+  Release: Config.xcconfig
 packages:
   NoteLumeCore:
     path: ../Core
@@ -41,6 +42,7 @@ targets:
         CFBundleDisplayName: NoteLume
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        AppGitHubURL: "$(APP_GITHUB_URL)"
         LSMinimumSystemVersion: "14.0"
         LSApplicationCategoryType: public.app-category.productivity
         NSHumanReadableCopyright: "Notes are plain Markdown files you own."
